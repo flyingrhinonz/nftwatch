@@ -1,0 +1,502 @@
+#!/usr/bin/python3
+# vim:set shiftwidth=4 expandtab:
+
+
+'''
+todo - intro goes here
+'''
+
+# Standard library imports:
+import argparse
+import collections
+import curses
+import datetime
+import getpass
+import itertools
+import logging
+import logging.handlers
+import operator
+import os
+import pathlib
+import pydoc
+import shlex
+import string
+import subprocess
+import sys
+import textwrap
+import time
+
+# Pay attention to these imports:
+import yaml         # Requires: 'pip3 install --user PyYAML'
+                    #   On a Debian based system you can also do:
+                    #   sudo apt-get install python3-yaml
+
+
+# Beginning of logging setup section:
+
+# Variables that control logging:
+LogLevel = logging.DEBUG
+    # ^ Initial log level of this program.
+    #       Edit this if you want to change the initial log level.
+    #       Supported levels: DEBUG, INFO, WARNING, ERROR, CRITICAL .
+MaxLogLineLength = 700
+    # ^ Wrap log lines longer than this many chars.
+    #   Keep a sensible and usable limit.
+SysLogProgName = 'nftwatch'
+    # ^ This is how our program is identified in syslog
+Indent = 8
+    # ^ Wrapped lines are indented by n spaces to make
+    #       logging easier to read.
+    #   This field is optional.
+IndentChar = '.'
+    # ^ What sub character to use for indenting.
+    #   This field is optional.
+EnhancedLogging = True
+    # ^ Use the fancy log line splitting (set to True).
+    #   This includes forced splitting the supplied text at
+    #       any \n newline marks.
+    #   Send log line as-is to syslog (set to False) -
+    #       you are responsible for line length constraints.
+SecureLogging = False
+    # ^ LogWrite supports safe logging if called in a particular way.
+    #       This allows you to code two versions of your log line and
+    #       depending upon this variable - one of the two will be logged.
+    #       For example - the 'unsafe' version is used during debugging and
+    #       the 'safe' version is used during production.
+    #   To use this feature - call LogWrite with a dict:
+    #       LogWrite.info( { 'safe': 'This message is CENSORED',
+    #           'unsafe': 'Sensitive information here' } )
+    #   If SecureLogging == True - the 'safe' value is logged.
+    #   If SecureLogging == False - the 'unsafe' value is logged.
+    #
+    #   If you want simple logging - call LogWrite with a string:
+    #       LogWrite.info('This will be logged as is')
+
+
+# Program identification strings:
+__version__     = '1.0.0'
+VersionDate     = '2022-01-29'
+ProgramName     = 'nftables counters watcher'
+AuthorName      = 'Kenneth Aaron'
+AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
+
+
+# This block handles logging to syslog:
+class CustomHandler(logging.handlers.SysLogHandler):
+    ''' Subclass for our custom log handler '''
+
+    def __init__(self):
+        super(CustomHandler, self).__init__(address = '/dev/log')
+            # ^ Very important to send the address bit to SysLogHandler
+            #   else you won't get logging in syslog!
+
+
+    def emit(self, record):
+        ''' Method for returning log lines to SysLogHandler.
+            Here is where we split long lines into smaller slices and
+            each slice gets logged with the appropriate syslog formatting,
+            as well as the identifiers we add that clearly state where
+            wrapping occurred.
+        '''
+
+        # This block deals with safe/unsafe/ignore LogWrite calls:
+        if isinstance(record.msg, str):
+            # ^ LogWrite was called with a basic string - ignore the SecureLogging setting
+            #       and log the line as is.
+            pass
+
+        elif isinstance(record.msg, dict):
+            # ^ LogWrite was called with a dict - log either safe/unsafe
+            #       per SecureLogging setting.
+
+            if SecureLogging:
+                record.msg = record.msg['safe']
+
+            else:
+                record.msg = record.msg['unsafe']
+
+        if EnhancedLogging:
+            # ^ We will split the supplied log line (record.msg) into multiple lines.
+            #   First - split the message at whatver \n newline chars were supplied
+            #   by the caller (even before our own fancy splitting is done):
+
+            RecordMsgSplitNL = record.msg.splitlines()
+                # ^ If the log message supplied contains new lines we will split
+                #   it at the newline mark - each split logged as a separate line.
+                #   The splitlines() method creates RecordMsgSplitNL as a list,
+                #   even if there was only one line in the original log message.
+                #   Note - lines split because of \n will not get the !!LINEWRAPPED!!
+                #   text prepended/appended at the split points.
+
+            SplitLinesMessage = []
+                # ^ Final version of line splitting
+
+            for LineLooper in RecordMsgSplitNL:
+                if len(LineLooper) < MaxLogLineLength:
+                    # ^ Normal line length detected
+                    SplitLinesMessage.append(LineLooper)
+
+                else:
+                    # ^ Long line detected, need to split
+                    TempTextWrapLines = (textwrap.wrap(
+                        LineLooper,
+                        width=(MaxLogLineLength - 15),
+                        subsequent_indent='!!LINEWRAPPED!!',
+                        drop_whitespace=False))
+                        # ^ If line to log is longer than MaxLogLineLength -
+                        #   split it into multiple lines and prepend !!LINEWRAPPED!!
+                        #   to the subsequent lines created by the split.
+
+                        # ^ Note - We subtract 15 because we're adding !!LINEWRAPPED!!
+                        #   at the end of lines, and we don't want the total length
+                        #   of the log line to exceed MaxLogLineLength .
+
+                        # ^ Note - textwrap.wrap doesn't know how to append text
+                        #   to wrapped lines, so we must do it manually later.
+
+                        # ^ Note - textwrap.wrap returns a list.
+
+                    #   If we needed to wrap long lines let's append the !!LINEWRAPPED!!
+                    #   text to the end of all lines except the last one:
+                    if len(TempTextWrapLines) > 1:
+                        for Looper in range(len(TempTextWrapLines)-1):
+                            TempTextWrapLines[Looper] = ( TempTextWrapLines[Looper] +
+                                '!!LINEWRAPPED!!' )
+
+                    SplitLinesMessage.extend(TempTextWrapLines)
+
+            # Finally, return the lines to the class,
+            # adding the indent to lines #2 and above if required:
+            for Counter, Looper in enumerate(SplitLinesMessage):
+                if Counter > 0:
+                    Looper = ( ((Indent - 4) * ' ') +
+                        (IndentChar * 4) +
+                        Looper )
+                        # ^ This adds the indent and .... to all subsequent lines
+                        #   after the first line - and applies to ALL LINES from
+                        #   the second onwards, both for lines split on newline
+                        #   and lines split on length!
+                        #   Don't be confused if some lines don't have the
+                        #   !!LINEWRAPPED!! text in them - there could be \n in
+                        #   the string passed, and we made new lines from that.
+                record.msg = Looper
+                super(CustomHandler, self).emit(record)
+
+        else:
+            super(CustomHandler, self).emit(record)
+                # ^ Pass it through as-is
+
+
+#logging.disable(level=logging.CRITICAL)
+    # ^ Uncomment this if you want to completely disable logging regardless of any
+    #   logging settings made anywhere else.
+
+LogWrite = logging.getLogger(SysLogProgName)
+LogWrite.setLevel(LogLevel)
+    # ^ Set this to logging.DEBUG or logging.WARNING for your INITIAL desired log level.
+    #   Config file (nftwatch.yml) log level takes over from when it is loaded,
+    #   This value controls logging verbosity until then so if you really want
+    #       debug level logging throughout your session, use 'nccm -d' .
+    #   If you need to see verbose logging BEFORE the nftwatch.yml is loaded (which
+    #       overrides this setting), make it DEBUG here. Well - don't actually edit it
+    #       here, but edit it in the earlier section 'Variables that control logging'
+    #       where the variable 'LogLevel' is configured.
+    #   This will also let you troubleshoot problems that occur in the initial stages
+    #       of nccm run - before the nftwatch.yml file is loaded.
+
+LogWrite.propagate = False
+    # ^ Prevents duplicate logging by ancestor loggers (if any)
+
+LogHandler = CustomHandler()
+LogWrite.addHandler(LogHandler)
+
+LogWriteFormatter = logging.Formatter(
+    fmt = '{}[%(process)d]: <%(levelname)s> '
+        '(%(asctime)s.%(msecs)03d , PN: %(processName)s , MN: %(module)s , '
+        'FN: %(funcName)s , '
+        'LI: %(lineno)d , TN: %(threadName)s):    '
+        '%(message)s'.format(SysLogProgName),
+    datefmt = '%Y-%m-%d %H:%M:%S' )
+    # ^ Select the attributes to include in the log lines
+    #   Documented here: https://docs.python.org/3/library/logging.html
+    #     (LogRecord attributes)
+    #
+    #   Note: On Python 3.6+ we can get millisecond date using:
+    #       datetime.datetime.now().isoformat(sep=' ', timespec='milliseconds')
+    #
+    #   Note: Any variables passed in the:  format(...)  section are fixed for the
+    #       duration of the run - don't use it to pass in a timestamp because it will
+    #       not change - ever.
+    #   This version gives dot milliseconds rather than the default comma as in
+    #       the builtin python function.
+    #       See here: https://stackoverflow.com/questions/6290739/python-logging-use-milliseconds-in-time-format
+
+    # Fields explained:
+    #   PN: Process Name
+    #   MN: Module Name (Also the file name of the first py file that is run
+    #       or the name of the symlink that ran it)
+    #   FN: Function Name
+    #   LI: LIne number
+    #   TN: Thread Name
+    #
+    #       LN: Logger Name (This is the contents of variable: SysLogProgName)
+    #           I'm not using it because it's already used in the first {} of:
+    #               {}[%(process)d]:
+
+    # Example:
+    #   Dec 29 14:35:29 asus303 nccm[31470]: <DEBUG> (2020-12-29 14:35:29.048 ,
+    #   PN: MainProcess , MN: cm , FN: SetupWindows , LI: 1268 , TN: MainThread):
+    #   ConnectionsList window built
+
+LogHandler.setFormatter(LogWriteFormatter)
+LogWrite.debug('nccm started with log level == {} as set by '
+    'LogWrite.setLevel (hardcoded in the script)'
+        .format(LogWrite.getEffectiveLevel()))
+    # ^ Note - this only gets logged if debug level is set in the script
+    #   using the LogLevel variable.
+
+# ^ End of logging setup section
+
+
+# Beginning of global variables section:
+
+class GlobalConfig:
+    ''' This is used as a simple global variable storage because GlobalConfig only
+        exists in the global scope, all references to it will escalate here. '''
+
+    ScreenHeight = ScreenWidth = 0
+        # ^ The terminal window dimensions
+
+    # Setup the supported directories/pathnames for the connections file.
+    # If you want to store nftwatch.yml in a directory that's not already supported
+    # or change the filename, do it here:
+    ConfigFile = 'nftwatch.yml'
+    ConfigFilePath = []
+        # ^ Try to load nftwatch.yml from these paths whichever is found first
+    ConfigFilePath.append(str(pathlib.Path.home()) + '/.config/nccm/' + ConfigFile)
+        # ^ ~/.config/nccm/nftwatch.yml
+    ConfigFilePath.append(str(pathlib.Path.home()) + '/.' + ConfigFile)
+        # ^ ~/.nftwatch.yml
+    ConfigFilePath.append(str(pathlib.Path.home()) + '/' + ConfigFile)
+        # ^ ~/nftwatch.yml
+    ConfigFilePath.append('/etc/' + ConfigFile)
+        # ^ /etc/nftwatch.yml
+
+    NftCommandLine = 'nft -nn --handle list ruleset'
+    # ^ The command line used to read the nftables output.
+
+    RefreshPeriod = 2
+    # ^ Refresh the display every n seconds.
+
+
+def LoadConfigFile():
+    ''' Loads the nftwatch.yml config file from the first path found '''
+
+    for FileLooper in GlobalConfig.ConfigFilePath:
+        if pathlib.Path(FileLooper).exists():
+            break
+    LogWrite.debug('Found config file: FileLooper == {}'.format(FileLooper))
+
+    with open (FileLooper, 'r') as ConfigFileToRead:
+        LoadedServersDict = yaml.safe_load(ConfigFileToRead)
+            # ^ yaml.load is not safe
+        # ^ Now we have the nccm.yml file loaded into LoadedServersDict.
+        #   This is both the ssh connections details as well as the
+        #   nccm_config_* items - all in the same dict.
+
+    LogWrite.debug('LoadedServersDict (contains prog settings + conn details) == {}'
+            .format(LoadedServersDict))
+        # ^ This dump will have program config + connection config details.
+        #   Soon we will pop out the program config items.
+
+    LogWrite.debug('Extracting program configs from LoadedServersDict ...')
+
+    # Handle loading of the NftCommandLine setting:
+    GlobalConfig.NftCommandLine = LoadedServersDict.pop(
+        'nftwatch_config_NftCommandLine', 'none').lower()
+    LogWrite.debug('Loaded {} config item:  NftCommandLine == {}'
+        .format(GlobalConfig.ConfigFile, GlobalConfig.NftCommandLine))
+
+    # Handle loading of the RefreshPeriod setting:
+    GlobalConfig.RefreshPeriod = int(LoadedServersDict.pop(
+        'nftwatch_config_NftCommandLine', '2'))
+    LogWrite.debug('Loaded {} config item:  RefreshPeriod == {}'
+        .format(GlobalConfig.ConfigFile, GlobalConfig.RefreshPeriod))
+
+
+
+
+
+def SetupCurses(stdscr):
+    ''' Put all pre-run tests here. Any failure will exit the program. '''
+
+    LogWrite.debug('Function SetupCurses started')
+    curses.curs_set(1)          # Enable the blinking cursor
+    curses.noecho()             # Disable echo to the terminal
+    stdscr.keypad(True)
+        # ^ Get special keys support in stdscr. Per window setting also required
+    curses.raw()                # Disable control codes
+
+    # Set up the vars for use later by:  curses.color_pair :
+    curses.init_pair(1, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        # ^ Used by the help menu shortcut key display
+    curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        # ^ Used by the help menu shortcut key help test
+    curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_BLUE)
+        # Used by the text box as supplied to:  class TextBox
+    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_RED)
+        # ^ Used by the marker line controlled by the arrows
+    curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_RED)
+        # ^ Used for setting alerts such as 'LogPrv'
+    curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)
+        # ^ Used for setting alerts such as 'LogTee'
+
+    if not curses.has_colors(): # Color not supported
+        RestoreTerminal(stdscr)
+        print('\nnccm: This program requires color support\n')
+        LogWrite.warning('This program requires color support')
+        return False
+
+    GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth = stdscr.getmaxyx()
+    LogWrite.debug('GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}'
+        .format(GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth))
+
+    if GlobalConfig.ScreenWidth < 60 or GlobalConfig.ScreenHeight < 15:
+        RestoreTerminal(stdscr)
+        print('\nnccm: Window must be at least 60x15\n')
+        LogWrite.warning('Window must be at least 60x15. '
+            'GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}'
+                .format(GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth))
+        return False
+
+    LogWrite.debug('Function SetupCurses should have completed successfully')
+
+
+def MainCursesFunction(stdscr):
+
+    LogWrite.debug('Function MainCursesFunction started')
+
+    if SetupCurses(stdscr) == False:
+        # ^ Something failed in setup or tests
+        LogWrite.error('SetupCurses(stdscr) failed')
+        return
+
+
+def InitialLogging():
+    ''' Put any useful logging here - such as startup env details.
+        This will require DEBUG level logging, so start nftwatch
+        in debug mode with the -d command line arg.
+
+        Or set the line as follows:
+            LogLevel = logging.DEBUG
+    '''
+
+    IntroLine = ('{} v{} , {} , by: {} ( {} )'
+        .format(ProgramName, __version__, VersionDate, AuthorName, AuthorEmail))
+
+    LogWrite.info(IntroLine)
+    LogWrite.info( {
+        'unsafe': 'Invoked commandline: {CmdLine} , from directory: {Dir} , '
+            'by user: {User} , UID: {UID} , PPID: {PPID} , log level: {LogLevel}'
+                .format(
+                    CmdLine = sys.argv,
+                    Dir = os.getcwd(),
+                    User = getpass.getuser(),
+                    UID = os.getuid(),
+                    PPID = os.getppid(),
+                    LogLevel = LogLevel ),
+        'safe':   'Invoked commandline: CENSORED , from directory: CENSORED , '
+        'by user: CENSORED , UID: CENSORED , PPID: CENSORED , log level: {LogLevel}'
+            .format(LogLevel = LogLevel) } )
+
+
+    LogWrite.info('Fields explained: PN: Process Name , MN: Module Name , '
+        'FN: Function Name , LI: LIne number , '
+        'TN: Thread Name')
+
+    if not SecureLogging:
+        LogWrite.warning('Attention:  SecureLogging == False  -->  '
+            'sensitive information will be logged to syslog/journal !')
+
+
+def ParseArgs():
+    ''' Handle any command line arguments supplied '''
+
+    global SecureLogging
+
+    parser = argparse.ArgumentParser(
+        description = 'nftables counters watcher by Kenneth Aaron',
+        epilog = 'Thank you for using nftwatch',
+        #add_help = False )
+            # ^ Bypass the built in argparse help generator and release
+            #   the -h and --help args for our own use.
+        )
+
+    parser.add_argument('-d', '--debug',
+        help='force debug verbosity logging, ignore other logging settings',
+        action='store_true' )
+
+    parser.add_argument('-m', '--man',
+        help='display nftwatch man page and exit',
+        action='store_true' )
+
+    parser.add_argument('-v', '--version',
+        help='show version and exit',
+        action='store_true' )
+
+    parser.add_argument('--logprivateinfo',
+        help='log uncensored usernames, hostnames, etc',
+        action='store_true' )
+
+    args = parser.parse_args()
+    #LogWrite.debug('args object = {}'.format(args))
+        # ^ Exposes private info before we get a chance to check the command
+        #       line args whether the user allows private info logging.
+
+    if args.logprivateinfo:
+        SecureLogging = False
+        LogWrite.warning('--logprivateinfo command line argument supplied - '
+            'stuff like usernames and hostnames will be logged to syslog/journal !')
+
+    if args.debug:
+        LogWrite.setLevel(logging.DEBUG)
+        GlobalConfig.ForceDebugLogging = True
+        LogWrite.debug('Received command line arg --debug forcing nccm '
+            'to run in debug mode')
+
+    LogWrite.debug('parser object = {}'.format(parser))
+    LogWrite.debug( {
+        'unsafe':   'args object == {}'.format(args),
+        'safe':     'args object == CENSORED' } )
+        # ^ Huh? I set:  nccm_config_logprivateinfo: true  in nftwatch.yml but I am still
+        #       seeing CENSORED in the logs! That's because this setting hasn't loaded yet.
+        #   Force it with command line arg:  --logprivateinfo
+
+    if args.man:
+        DisplayHelp()
+        sys.exit(0)
+
+    if args.version:
+        print(__version__)
+        sys.exit(0)
+
+
+def main(*args):
+
+    ParseArgs()     # Command line args processing happens here
+    InitialLogging()
+        # ^ Moved it after ParseArgs so that we have debugging info logged if
+        #   started using 'nccm -d' .
+    LoadConfigFile()
+    curses.wrapper(MainCursesFunction)
+
+
+
+if __name__ == '__main__':
+    ScriptStartTime = time.time()
+    main()
+
+    LogWrite.info('{} exiting. Program run time: {:.3f} seconds'
+        .format(ProgramName, time.time() - ScriptStartTime))
+
+
