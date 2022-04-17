@@ -79,8 +79,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.0'
-VersionDate     = '2022-01-29'
+__version__     = '1.0.1'
+VersionDate     = '2022-04-17'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -303,6 +303,13 @@ class GlobalConfig:
     RefreshScreen = True
         # ^ Set to False if you want to pause output
 
+    SkipSleep = False
+        # ^ Skip the sleep set by:  RefreshPeriod  mostly for user interactive actions
+        #       such as keypress.
+
+    ForceScreenRedraw = False
+        # ^ Force redraw the screen - useful when scrolling the display.
+
 
 
     # Config file vars:
@@ -376,11 +383,20 @@ class NftStats:
         # ^ Same data as:  LastFullNftOutput  but split into list of lines where each line
         #       is a dict of values.
 
+    LastMaxLengths = {}
+        # ^ The maximum field lengths of items from:  LastSplitNftOutput
+
     PreviousSplitNftOutput = []
         # ^ Sesond last results. Used for rates calculations.
 
+    PreviousMaxLengths = []
+        # ^ The maximum field lengths of items from:  PreviousSplitNftOutput
+
     FreezeSplitNftOutput = []
         # ^ This is used for generating window output and allowing scrolling in pause mode.
+
+    FreezeMaxLengths = []
+        # ^ The maximum field lengths of items from:  FreezeSplitNftOutput
 
     NftReadCycle = 0
         # ^ Incremented by 1 each time we read stats from nft
@@ -482,6 +498,7 @@ def ReadNftOutput():
         #LogWrite.debug('NftStats.LastFullNftOutput ==\n{}'.format(NftStats.LastFullNftOutput))
             # ^ Too much logging
         NftStats.LastSplitNftOutput = []
+        NftStats.LastMaxLengths = {}
         HandleList = []
             # ^ Used to detect if any duplicate handle numbers exist in the ruleset.
 
@@ -629,7 +646,14 @@ def ReadNftOutput():
                     if PrevLooper['Handle'] == HandleResult:
                         if ( PrevLooper['DetailsText'] == DetailsResult ) and ( PrevLooper['CommentText'] == CommentResult ):
                             if PacketsResult >=0:
-                                PPS = round((PacketsResult - PrevLooper['Packets']) / GlobalConfig.RefreshPeriod)
+
+                                # This is needed because of rates per second. If our refresh rate is less than
+                                #   1 sec we must multiply else we get big numbers:
+                                if GlobalConfig.RefreshPeriod >= 1:
+                                    PPS = round((PacketsResult - PrevLooper['Packets']) / GlobalConfig.RefreshPeriod)
+                                else:
+                                    PPS = round((PacketsResult - PrevLooper['Packets']) * GlobalConfig.RefreshPeriod)
+
                                 PPSText = str(PPS)
                                 if len(PPSText) > MaxPPSTextLength:
                                     MaxPPSTextLength = len(PPSText)
@@ -642,7 +666,11 @@ def ReadNftOutput():
                                 HumanPPSText = ''
 
                             if BytesResult >=0:
-                                BPS = round((BytesResult - PrevLooper['Bytes']) / GlobalConfig.RefreshPeriod)
+
+                                if GlobalConfig.RefreshPeriod >= 1:
+                                    BPS = round((BytesResult - PrevLooper['Bytes']) / GlobalConfig.RefreshPeriod)
+                                else:
+                                    BPS = round((BytesResult - PrevLooper['Bytes']) * GlobalConfig.RefreshPeriod)
                                 BPSText = str(BPS)
                                 if len(BPSText) > MaxBPSTextLength:
                                     MaxBPSTextLength = len(BPSText)
@@ -681,44 +709,49 @@ def ReadNftOutput():
             NftStats.LastSplitNftOutput.append({
                 'Handle': HandleResult,                                         # int
                 'HandleText': HandleTextResult,                                 # string
-                'MaxHandleTextLength': MaxHandleTextLength,                     # int
 
                 'Packets': PacketsResult,                                       # int
                 'PacketsText': PacketsTextResult,                               # string
-                'MaxPacketsTextLength': MaxPacketsTextLength,                   # int
 
                 'HumanPacketsText': HumanPacketsText,                           # string
-                'MaxHumanPacketsTextLength': MaxHumanPacketsTextLength,         # int
 
                 'PPS' : PPS,                                                    # int
                 'PPSText': PPSText,                                             # string
-                'MaxPPSTextLength': MaxPPSTextLength,                           # int
 
                 'HumanPPSText': HumanPPSText,                                   # string
-                'MaxHumanPPSTextLength': MaxHumanPPSTextLength,                 # int
 
                 'Bytes': BytesResult,                                           # int
                 'BytesText': BytesTextResult,                                   # string
-                'MaxBytesTextLength': MaxBytesTextLength,                       # int
 
                 'HumanBytesText': HumanBytesText,                               # string
-                'MaxHumanBytesTextLength': MaxHumanBytesTextLength,             # int
 
                 'BPS' : BPS,                                                    # int
                 'BPSText': BPSText,                                             # string
-                'MaxBPSTextLength': MaxBPSTextLength,                           # int
 
                 'HumanBPSText': HumanBPSText,                                   # string
-                'MaxHumanBPSTextLength': MaxHumanBPSTextLength,                 # int
 
                 'CommentText': CommentResult,                                   # string
-                'MaxCommentTextLength': MaxCommentTextLength,                   # int
 
                 'LeadingWhitespace': LeadingWhitespaceResult,                   # string
 
                 'DetailsText': DetailsResult,                                   # string
-                'MaxDetailsTextLength': MaxDetailsTextLength                    # int
                 })
+
+        # Collect the max item lengths:
+        NftStats.LastMaxLengths.update({
+            'MaxHandleTextLength': MaxHandleTextLength,                     # int
+            'MaxPacketsTextLength': MaxPacketsTextLength,                   # int
+            'MaxHumanPacketsTextLength': MaxHumanPacketsTextLength,         # int
+            'MaxPPSTextLength': MaxPPSTextLength,                           # int
+            'MaxHumanPPSTextLength': MaxHumanPPSTextLength,                 # int
+            'MaxBytesTextLength': MaxBytesTextLength,                       # int
+            'MaxHumanBytesTextLength': MaxHumanBytesTextLength,             # int
+            'MaxBPSTextLength': MaxBPSTextLength,                           # int
+            'MaxHumanBPSTextLength': MaxHumanBPSTextLength,                 # int
+            'MaxCommentTextLength': MaxCommentTextLength,                   # int
+            'MaxDetailsTextLength': MaxDetailsTextLength                    # int
+            })
+        #LogWrite.debug('NftStats.LastMaxLengths == {}'.format(NftStats.LastMaxLengths))
 
         #LogLastSplitNftOutput()
             # ^ Too much logging
@@ -726,10 +759,12 @@ def ReadNftOutput():
         NftStats.LenLastRead = len(NftStats.LastSplitNftOutput)
         NftStats.PreviousSplitNftOutput = NftStats.LastSplitNftOutput
         NftStats.LenPrevRead = len(NftStats.PreviousSplitNftOutput)
+        NftStats.PreviousMaxLengths = NftStats.LastMaxLengths
 
         if GlobalConfig.RefreshScreen:
             # ^ Did the user request a pause display?
             NftStats.FreezeSplitNftOutput = NftStats.LastSplitNftOutput
+            NftStats.FreezeMaxLengths = NftStats.LastMaxLengths
                 # ^ Use this for display, allowing pause mode scroll while still updating the stats in the background.
                 #   If output paused - the frozen status (NftStats.FreezeSplitNftOutput) doesn't update - allowing
                 #       the user to scroll the display without updates.
@@ -738,12 +773,43 @@ def ReadNftOutput():
         DisplayWindows()
 
         if GlobalConfig.RefreshScreen:
-            time.sleep(GlobalConfig.RefreshPeriod)
-            # ^ Only sleep in refresh mode (not paused) - this will allow the user to scroll the display
-            #       without delays.
+            SmartSleep()
 
         if GlobalConfig.ExitProgram:
             break
+
+
+def SmartSleep():
+    '''  Sleep the defined time but periodically check if need to exit '''
+
+    Counter = 0
+
+    if GlobalConfig.SkipSleep:
+        pass
+        # ^ Only sleep in refresh mode (not paused) - this will allow the user to scroll the display
+        #       without delays.
+
+    else:
+        if GlobalConfig.RefreshPeriod <= 0.02:
+            time.sleep(GlobalConfig.RefreshPeriod)
+        else:
+            while True:
+                if GlobalConfig.ForceScreenRedraw:
+                    PopulateWindows()
+                    DisplayWindows()
+                    # ^ Note - redrawing windows can only happen from within function:  ReadNftOutput
+                    #       or functions called from within it - this is to avoid doing a redraw while
+                    #       stats are still being written (multi threading issue).
+                    GlobalConfig.ForceScreenRedraw = False
+
+                if GlobalConfig.SkipSleep:
+                    break
+                time.sleep(0.02)
+                Counter += 0.02
+                if Counter >= GlobalConfig.RefreshPeriod:
+                    break
+
+    GlobalConfig.SkipSleep = False
 
 
 def LogLastSplitNftOutput():
@@ -892,9 +958,9 @@ def SetupWindows(stdscr):
 
     # Build the status box:
     Windows.StatusBox = curses.newwin(1, 30, GlobalConfig.ScreenHeight-1, 30)
-    Windows.StatusBox.addstr('R='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
+    Windows.StatusBox.addstr('Update='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
         # ^ This is the refresh (pause in reverse) status
-    Windows.StatusBox.addstr('  S='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
+    Windows.StatusBox.addstr('  Sleep='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
         # ^ This is the sleep time between refreshes
 
     Windows.HelpBox.keypad(True)
@@ -949,7 +1015,6 @@ def PopulateWindows():
     Windows.StatusBox.erase()
     CounterString = ''
 
-
     for Looper in range(GlobalConfig.VerticalOffset, ( GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 ) ):
 
         if GlobalConfig.DisplayMode == 'human':
@@ -967,12 +1032,18 @@ def PopulateWindows():
                 # ^ The counters have a fixed width and do not scroll. Therefore we can
                 #       immediately add it to the curses window.
 
-            FullCommentText = NftStats.FreezeSplitNftOutput[Looper]['CommentText'][0:GlobalConfig.TruncateComment].ljust((GlobalConfig.TruncateComment + 2), ' ')
+            if GlobalConfig.TruncateComment < 1000:
+                MaxCommentLen = GlobalConfig.TruncateComment
+            else:
+                MaxCommentLen = NftStats.FreezeMaxLengths['MaxCommentTextLength']
+            #LogWrite.debug('MaxCommentLen == {}'.format(MaxCommentLen))
+
+            FullCommentText = NftStats.FreezeSplitNftOutput[Looper]['CommentText'][0:MaxCommentLen].ljust((MaxCommentLen), ' ')
             # ^ The +2 at the end is required for a small space before the beginning of the next field.
             #   Here we collect the first n chars of the comment in case the config file
             #       said to truncate it.
 
-            DetailsString = FullCommentText + NftStats.FreezeSplitNftOutput[Looper]['LeadingWhitespace'] + NftStats.FreezeSplitNftOutput[Looper]['DetailsText']
+            DetailsString = FullCommentText + NftStats.FreezeSplitNftOutput[Looper]['LeadingWhitespace'] + '  ' + NftStats.FreezeSplitNftOutput[Looper]['DetailsText']
                 # ^ This generates the entire length of the comment+details string
 
             DetailsString = DetailsString[0:GlobalConfig.DetailsWidth - 1] + '\n'
@@ -980,8 +1051,8 @@ def PopulateWindows():
 
             Windows.DetailsOutputBox.addstr(str(DetailsString), curses.color_pair(7))
 
-    Windows.StatusBox.addstr('P='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
-    Windows.StatusBox.addstr('  S='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
+    Windows.StatusBox.addstr('Update='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
+    Windows.StatusBox.addstr('  Sleep='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
 
 
 def DisplayWindows():
@@ -1022,11 +1093,12 @@ def MainCursesFunction(stdscr):
             #   Per the docs here:  https://docs.python.org/3/howto/curses.html  - getch
             #       refreshes the screen and then waits for input. But we have windows, not only
             #       the main stdscr screen, so refreshing stdscr will make the display disappear.
-        LogWrite.debug('UserKey == {}'.format(UserKey))
+        #LogWrite.debug('UserKey == {}'.format(UserKey))
 
         if UserKey in [17, 113]:
             # ^ ctrl-q or q key to Quit
             GlobalConfig.ExitProgram = True
+            GlobalConfig.SkipSleep = True
             LogWrite.info('User requested quit program. Cleaning up and exiting ...')
             sys.exit(0)
 
@@ -1037,47 +1109,55 @@ def MainCursesFunction(stdscr):
 
         elif UserKey == 102:
             # ^ f key to make display update Faster (halve:  GlobalConfig.RefreshPeriod)
-            GlobalConfig.RefreshPeriod = ( GlobalConfig.RefreshPeriod / 2 )
-            LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
+            if ( GlobalConfig.RefreshPeriod / 2 ) >= 0.1:
+                GlobalConfig.RefreshPeriod = ( GlobalConfig.RefreshPeriod / 2 )
+                #LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
+            GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey == 115:
             # ^ s key to make display update Slower (double:  GlobalConfig.RefreshPeriod)
             GlobalConfig.RefreshPeriod = ( GlobalConfig.RefreshPeriod * 2 )
-            LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
+            #LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
+            GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey == 258:
             # ^ arrow down key
             if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + GlobalConfig.MaxScreenLines ):
                 # ^ Are there enough lines below to allow scroll down by one line?
                 GlobalConfig.VerticalOffset += 1
-                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey == 259:
             # ^ arrow up key
             if GlobalConfig.VerticalOffset > 0:
                 # ^ Are there enough lines below to allow scroll up by one line?
                 GlobalConfig.VerticalOffset -= 1
-                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey == 262:
             # ^ home key
             GlobalConfig.VerticalOffset = 0
-            LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey == 360:
             # ^ end key
             GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
-            LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
 
-        elif UserKey == 338:
-            # ^ page down key
+        elif UserKey in [32, 338]:
+            # ^ page down key or space bar
             if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + GlobalConfig.MaxScreenLines ):
                 # ^ Are there enough lines below to allow page down?
                 if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + ( GlobalConfig.MaxScreenLines * 2 ) ):
                     GlobalConfig.VerticalOffset += ( GlobalConfig.MaxScreenLines - 1 )
                 else:
                     GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
-                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey == 339:
             # ^ page up key
@@ -1088,10 +1168,8 @@ def MainCursesFunction(stdscr):
                     GlobalConfig.VerticalOffset -= ( GlobalConfig.MaxScreenLines - 1 )
                 else:
                     GlobalConfig.VerticalOffset = 0
-                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
-
-        #DisplayWindows()
-            # ^ Probably not needed
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
 
 
 def InitialLogging():
