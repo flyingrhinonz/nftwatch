@@ -19,17 +19,22 @@ import operator
 import os
 import pathlib
 import pydoc
+import re
 import shlex
 import string
 import subprocess
 import sys
 import textwrap
+import threading
 import time
+import typing
 
 # Pay attention to these imports:
 import yaml         # Requires: 'pip3 install --user PyYAML'
                     #   On a Debian based system you can also do:
-                    #   sudo apt-get install python3-yaml
+                    #       sudo apt-get install python3-yaml
+                    #   On Fedora you can do:
+                    #       dnf install python3-pyyaml
 
 
 # Beginning of logging setup section:
@@ -264,8 +269,44 @@ class GlobalConfig:
     ''' This is used as a simple global variable storage because GlobalConfig only
         exists in the global scope, all references to it will escalate here. '''
 
+    # ncurses vars:
+    # =============
+
     ScreenHeight = ScreenWidth = 0
         # ^ The terminal window dimensions
+
+    MaxScreenLines = 0
+        # ^ Max number of nft rules to display
+
+    CountersWidth = 42
+        # ^ Width of the counters output
+
+    DetailsWidth = 0
+        # ^ Width of the details output
+
+    HelpMenuItems = collections.OrderedDict((
+        ( 'ctrl-h',     'Help' ),
+        ( 'ctrl-q',     'Quit' ),
+    ))
+
+    VerticalOffset = 0
+        # ^ Vertical offset into the nftables list
+        #       (up/down arrow scrolling in the list)
+        #   This will be controlled in function:  MainCursesFunction  to ensure that
+        #       scrolled-down displays still fit in the window fully and dont overrun
+        #       the length of the list.
+
+    DetailsOffset = 0
+        # ^ Horizontal offset into the details window oupput
+        #       (left/right arrow scrolling for handling long lines in the details window)
+
+    RefreshScreen = True
+        # ^ Set to False if you want to pause output
+
+
+
+    # Config file vars:
+    # =================
 
     # Setup the supported directories/pathnames for the connections file.
     # If you want to store nftwatch.yml in a directory that's not already supported
@@ -282,11 +323,432 @@ class GlobalConfig:
     ConfigFilePath.append('/etc/' + ConfigFile)
         # ^ /etc/nftwatch.yml
 
-    NftCommandLine = 'nft -nn --handle list ruleset'
-    # ^ The command line used to read the nftables output.
+    NftCommandLine = '/usr/sbin/nft -nn --handle list ruleset'
+        # ^ The command line used to read the nftables output.
 
     RefreshPeriod = 2
-    # ^ Refresh the display every n seconds.
+        # ^ Refresh the display every n seconds.
+
+    DisplayHandle = True
+        # ^ Display the nftables rule handle.
+
+    TruncateComment = 0
+        # ^ Truncate the comment text to this length, or 0 to disable truncation.
+
+    TruncateDetails = 0
+        # ^ Truncate the details text to this length, or 0 to disable truncation.
+
+    DisplayMode = 'human'
+        # ^ Display counters in human or full format
+
+    # rulebase vars:
+    # ==============
+
+    Timeout = 2
+        # ^ Wait n seconds for command output
+
+    ReLeadingWhitespace = re.compile('^\s+')
+        # ^ Look for leading whitespace
+
+    ReCounter = re.compile('counter packets \d+ bytes \d+')
+        # ^ Matches:  "counter packets x bytes y"  text
+
+    ReComment = re.compile('comment "(.*?)"')
+        # ^ Matches:  'comment "..."'  text
+
+    ReHandle = re.compile(' # handle.*')
+        # ^ Matches:  " handle x"  text
+
+    ReMultipleSpaces = re.compile('\s+')
+        # ^ Used to replace multiple whitespace with a single space
+
+    ExitProgram = False
+        # Tells all threads to quit allowing program exit
+
+
+class NftStats:
+    ''' Keep the raw and processed nft stats here '''
+
+    LastFullNftOutput = ''
+        # ^ Raw output from reading nft rulebase
+
+    LastSplitNftOutput = []
+        # ^ Same data as:  LastFullNftOutput  but split into list of lines where each line
+        #       is a dict of values.
+
+    PreviousSplitNftOutput = []
+        # ^ Sesond last results. Used for rates calculations.
+
+    FreezeSplitNftOutput = []
+        # ^ This is used for generating window output and allowing scrolling in pause mode.
+
+    NftReadCycle = 0
+        # ^ Incremented by 1 each time we read stats from nft
+
+    LenLastRead = 0
+        # ^ Length of the:  LastSplitNftOutput  list
+
+    LenPrevRead = 0
+        # ^ Length of the:  PreviousSplitNftOutput  list
+
+
+class Windows:
+    ''' This is a placeholder for the various curses windows we will create
+        in the:  SetupWindows  function. '''
+    pass
+
+
+# Program begins below:
+
+class HumanVals:
+    '''
+        Comes from:  https://stackoverflow.com/questions/12523586/python-format-size-application-converting-b-to-kb-mb-gb-tb
+        Credit to:  Mitch McMabers  for the original version of this code.
+
+        Examples:
+            print(HumanVals.format(2251799813685247)) # 2 pebibytes
+            print(HumanVals.format(2000000000000000, True)) # 2 petabytes
+            print(HumanVals.format(1099511627776)) # 1 tebibyte
+            print(HumanVals.format(1000000000000, True)) # 1 terabyte
+            print(HumanVals.format(1000000000, True)) # 1 gigabyte
+            print(HumanVals.format(4318498233, precision=3)) # 4.022 gibibytes
+            print(HumanVals.format(4318498233, True, 3)) # 4.318 gigabytes
+            print(HumanVals.format(-4318498233, precision=2)) # -4.02 gibibytes
+    '''
+
+    METRIC_LABELS: typing.List[str] = [" ", "K", "M", "G", "T", "P", "E", "Z", "Y"]
+    #BINARY_LABELS: typing.List[str] = [" ", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi", "Yi"]
+    # ^ Technically this is correct, but I'm saving one char in my output.
+    BINARY_LABELS: typing.List[str] = [" ", "K", "M", "G", "T", "P", "E", "Z", "Y"]
+    PRECISION_OFFSETS: typing.List[float] = [0.5, 0.05, 0.005, 0.0005] # PREDEFINED FOR SPEED.
+    PRECISION_FORMATS: typing.List[str] = ["{}{:.0f} {}", "{}{:.1f} {}", "{}{:.2f} {}", "{}{:.3f} {}"] # PREDEFINED FOR SPEED.
+
+    @staticmethod
+    def format(num: typing.Union[int, float], metric: bool=False, precision: int=1) -> str:
+        """
+        Human-readable formatting of bytes, using binary (powers of 1024)
+        or metric (powers of 1000) representation.
+        """
+
+        assert isinstance(num, (int, float)), "num must be an int or float"
+        assert isinstance(metric, bool), "metric must be a bool"
+        assert isinstance(precision, int) and precision >= 0 and precision <= 3, "precision must be an int (range 0-3)"
+
+        unit_labels = HumanVals.METRIC_LABELS if metric else HumanVals.BINARY_LABELS
+        last_label = unit_labels[-1]
+        unit_step = 1000 if metric else 1024
+        unit_step_thresh = unit_step - HumanVals.PRECISION_OFFSETS[precision]
+
+        is_negative = num < 0
+        if is_negative: # Faster than ternary assignment or always running abs().
+            num = abs(num)
+
+        for unit in unit_labels:
+
+            if num < unit_step_thresh:
+                # VERY IMPORTANT:
+                # Only accepts the CURRENT unit if we're BELOW the threshold where
+                # float rounding behavior would place us into the NEXT unit: F.ex.
+                # when rounding a float to 1 decimal, any number ">= 1023.95" will
+                # be rounded to "1024.0". Obviously we don't want ugly output such
+                # as "1024.0 KiB", since the proper term for that is "1.0 MiB".
+                break
+
+            if unit != last_label:
+                # We only shrink the number if we HAVEN'T reached the last unit.
+                # Note: These looped divisions accumulate floating point rounding
+                # errors, but each new division pushes the rounding errors further
+                # and further down in the decimals, so it doesn't matter at all.
+                num /= unit_step
+
+        return HumanVals.PRECISION_FORMATS[precision].format("-" if is_negative else "", num, unit)
+
+
+def ReadNftOutput():
+    ''' Reads the output from nft rulebase '''
+
+    while True:
+        #LogWrite.debug('NftStats.NftReadCycle == {}'.format(NftStats.NftReadCycle))
+            # ^ Too much logging
+
+        # Setup vars:
+        # ===========
+
+        NftOutput = subprocess.run(GlobalConfig.NftCommandLine,
+            capture_output=True, timeout=GlobalConfig.Timeout, check=True, text=True, shell=True)
+            # ^ Read the nft rules outoput (along with counters and other fields).
+
+        NftStats.LastFullNftOutput = NftOutput.stdout
+        #LogWrite.debug('NftStats.LastFullNftOutput ==\n{}'.format(NftStats.LastFullNftOutput))
+            # ^ Too much logging
+        NftStats.LastSplitNftOutput = []
+        HandleList = []
+            # ^ Used to detect if any duplicate handle numbers exist in the ruleset.
+
+        MaxHandleTextLength = MaxPacketsTextLength = MaxBytesTextLength = 0
+        MaxPPSTextLength = MaxBPSTextLength = 0
+        MaxCommentTextLength = MaxDetailsTextLength = 0
+            # ^ Used to determine the text field lengths for column display
+
+        MaxHumanPacketsTextLength = MaxHumanPPSTextLength = 5
+        MaxHumanBytesTextLength = MaxHumanBPSTextLength = 5
+            # Same for the human readable values, but since the function does rounding - the max text
+            #   length will always be 5 so let's not calculate it because this will result in a window
+            #   size that changes too often.
+
+
+        # Process ruleset line by line:
+        # =============================
+
+        for Looper in NftStats.LastFullNftOutput.splitlines():
+            # ^ Looping over the recently read stats, line by line
+            #LogWrite.info('Cycle number: {} , Processing:  Looper == {}'.format(NftStats.NftReadCycle, Looper))
+                # ^ Too much logging
+
+
+            # Process the leading whitespace value:
+            # -------------------------------------
+
+            Result = GlobalConfig.ReLeadingWhitespace.search(Looper)
+            if Result:
+                LeadingWhitespaceResult = Result.group()
+                LeadingWhitespaceResult = LeadingWhitespaceResult.replace('\t', '    ')
+                    # ^ nftables supplies config blocks indented with tab (8 spaces) which is too much.
+                    #   Let's reduce it to 4 spaces.
+
+            else:
+                LeadingWhitespaceResult = ''
+
+            #LogWrite.info('LeadingWhitespaceResult == "{}"'.format(LeadingWhitespaceResult))
+                # ^ Too much logging
+
+
+            # Process the counters value:
+            # ---------------------------
+
+            Result = GlobalConfig.ReCounter.search(Looper)
+            if Result:
+                CounterResult = Result.group()
+
+                PacketsResult = int(CounterResult.split()[2])
+                PacketsTextResult = str(PacketsResult)
+                if len(PacketsTextResult) > MaxPacketsTextLength:
+                    MaxPacketsTextLength = len(PacketsTextResult)
+
+                BytesResult = int(CounterResult.split()[4])
+                BytesTextResult = str(BytesResult)
+                if len(BytesTextResult) > MaxBytesTextLength:
+                    MaxBytesTextLength = len(BytesTextResult)
+
+            else:
+                CounterResult = False
+                PacketsResult = BytesResult = -1
+                    # ^ There are no counters present but I can't use:  False  on the counters
+                    #       because values of:  0  and:  False  are evaluated the same way.
+                PacketsTextResult = BytesTextResult = ''
+
+            #LogWrite.info('CounterResult == {} , PacketsResult == {} , BytesResult == {}'.format(CounterResult, PacketsResult, BytesResult))
+                # ^ Too much logging
+
+
+            # Process the comment value:
+            # --------------------------
+
+            Result = GlobalConfig.ReComment.search(Looper)
+            if Result:
+                CommentResult = Result.group()
+                CommentResult = CommentResult.strip()
+                CommentResult = CommentResult.replace('comment "', '')
+                CommentResult = CommentResult[:-1]
+                if len(CommentResult) > MaxCommentTextLength:
+                    MaxCommentTextLength = len(CommentResult)
+
+            else:
+                CommentResult = ''
+
+            #LogWrite.info('CommentResult == {}'.format(CommentResult))
+                # ^ Too much logging
+
+
+            # Process the handle value:
+            # -------------------------
+
+            Result = GlobalConfig.ReHandle.search(Looper)
+            if Result:
+                HandleResult = int(Result.group().split()[2])
+                HandleTextResult = str(HandleResult)
+                if len(HandleTextResult) > MaxHandleTextLength:
+                        MaxHandleTextLength = len(HandleTextResult)
+
+                if HandleResult in HandleList:
+                    # ^ Duplicate handle detector
+                    #LogWrite.warning('HandleResult == {}  already found in:  HandleList == {} , line Looper == {}'.format(HandleResult, HandleList, Looper))
+                        # ^ Too much logging
+                    pass
+
+                HandleList.append(HandleResult)
+
+            else:
+                HandleResult = False
+                HandleTextResult = ''
+
+            #LogWrite.info('HandleResult == {}'.format(HandleResult))
+                # ^ Too much logging
+
+
+            # Process the details value:
+            # --------------------------
+
+            # Prepare a value of other text not collected explicitly above.
+            #   This will mostly be the rule content:
+            DetailsResult = GlobalConfig.ReLeadingWhitespace.sub('', Looper)
+            DetailsResult = GlobalConfig.ReCounter.sub('', DetailsResult)
+            DetailsResult = GlobalConfig.ReComment.sub('', DetailsResult)
+            DetailsResult = GlobalConfig.ReHandle.sub('', DetailsResult)
+            DetailsResult = GlobalConfig.ReMultipleSpaces.sub(' ', DetailsResult)
+            DetailsResult = DetailsResult.strip()
+            if len(DetailsResult) > MaxDetailsTextLength:
+                MaxDetailsTextLength = len(DetailsResult)
+
+            #LogWrite.info('DetailsResult == {}'.format(DetailsResult))
+                # ^ Too much logging
+
+
+            # Calculate BPS & PPS values:
+            # ---------------------------
+
+            # Prepare the PPS and BPS values (based upon difference with previous reading):
+            #LogWrite.debug('Calculating rates for handle: {} ...'.format(HandleResult))
+                # ^ Too much logging
+            if CounterResult and NftStats.NftReadCycle >= 1:
+                # ^ Remember - in the first cycle we have no history therefore we cannot calculate rates.
+
+                for PrevLooper in NftStats.PreviousSplitNftOutput:
+                    # ^ Loop over the previous reading and search for a matching handle number
+
+                    if PrevLooper['Handle'] == HandleResult:
+                        if ( PrevLooper['DetailsText'] == DetailsResult ) and ( PrevLooper['CommentText'] == CommentResult ):
+                            if PacketsResult >=0:
+                                PPS = round((PacketsResult - PrevLooper['Packets']) / GlobalConfig.RefreshPeriod)
+                                PPSText = str(PPS)
+                                if len(PPSText) > MaxPPSTextLength:
+                                    MaxPPSTextLength = len(PPSText)
+                                HumanPacketsText = str(HumanVals.format(PacketsResult, precision=0))
+                                HumanPPSText = str(HumanVals.format(PPS, precision=0))
+                            else:
+                                PPS = 0
+                                PPSText = ''
+                                HumanPacketsText = ''
+                                HumanPPSText = ''
+
+                            if BytesResult >=0:
+                                BPS = round((BytesResult - PrevLooper['Bytes']) / GlobalConfig.RefreshPeriod)
+                                BPSText = str(BPS)
+                                if len(BPSText) > MaxBPSTextLength:
+                                    MaxBPSTextLength = len(BPSText)
+                                HumanBytesText = str(HumanVals.format(BytesResult, precision=0))
+                                HumanBPSText = str(HumanVals.format(BPS, precision=0))
+                            else:
+                                BPS = 0
+                                BPSText = ''
+                                HumanBytesText = ''
+                                HumanBPSText = ''
+
+                        else:
+                            # Looks like a bug in nft - two identical handles on different rules?
+                            #LogWrite.warning('Possible two different rules with the same handle: '
+                            #    'HandleResult == {} , PrevLooper[Handle] == {} , DetailsResult = {} , '
+                            #    'PrevLooper[DetailsText] == {} , CommentResult == {} , PrevLooper[CommentText] == {}'
+                            #        .format(HandleResult, PrevLooper['Handle'], DetailsResult,
+                            #            PrevLooper['DetailsText'], CommentResult, PrevLooper['CommentText']))
+                                # ^ Too much logging
+                            pass
+
+            elif CounterResult and NftStats.NftReadCycle < 1:
+                PPS = BPS = 0
+                PPSText = BPSText = HumanPacketsText = HumanBytesText = HumanPPSText = HumanBPSText  = ''
+
+            elif not CounterResult:
+                # ^ Many rules have no counters so we need to supply values
+                #       for the stats collection here too.
+                PPS = BPS = 0
+                PPSText = BPSText = HumanPacketsText = HumanBytesText = HumanPPSText = HumanBPSText  = ''
+
+            else:
+                LogWrite.error('Unexpected error occurred')
+
+            # Write out a list of dicts for the current stats:
+            NftStats.LastSplitNftOutput.append({
+                'Handle': HandleResult,                                         # int
+                'HandleText': HandleTextResult,                                 # string
+                'MaxHandleTextLength': MaxHandleTextLength,                     # int
+
+                'Packets': PacketsResult,                                       # int
+                'PacketsText': PacketsTextResult,                               # string
+                'MaxPacketsTextLength': MaxPacketsTextLength,                   # int
+
+                'HumanPacketsText': HumanPacketsText,                           # string
+                'MaxHumanPacketsTextLength': MaxHumanPacketsTextLength,         # int
+
+                'PPS' : PPS,                                                    # int
+                'PPSText': PPSText,                                             # string
+                'MaxPPSTextLength': MaxPPSTextLength,                           # int
+
+                'HumanPPSText': HumanPPSText,                                   # string
+                'MaxHumanPPSTextLength': MaxHumanPPSTextLength,                 # int
+
+                'Bytes': BytesResult,                                           # int
+                'BytesText': BytesTextResult,                                   # string
+                'MaxBytesTextLength': MaxBytesTextLength,                       # int
+
+                'HumanBytesText': HumanBytesText,                               # string
+                'MaxHumanBytesTextLength': MaxHumanBytesTextLength,             # int
+
+                'BPS' : BPS,                                                    # int
+                'BPSText': BPSText,                                             # string
+                'MaxBPSTextLength': MaxBPSTextLength,                           # int
+
+                'HumanBPSText': HumanBPSText,                                   # string
+                'MaxHumanBPSTextLength': MaxHumanBPSTextLength,                 # int
+
+                'CommentText': CommentResult,                                   # string
+                'MaxCommentTextLength': MaxCommentTextLength,                   # int
+
+                'LeadingWhitespace': LeadingWhitespaceResult,                   # string
+
+                'DetailsText': DetailsResult,                                   # string
+                'MaxDetailsTextLength': MaxDetailsTextLength                    # int
+                })
+
+        #LogLastSplitNftOutput()
+            # ^ Too much logging
+        NftStats.NftReadCycle += 1
+        NftStats.LenLastRead = len(NftStats.LastSplitNftOutput)
+        NftStats.PreviousSplitNftOutput = NftStats.LastSplitNftOutput
+        NftStats.LenPrevRead = len(NftStats.PreviousSplitNftOutput)
+
+        if GlobalConfig.RefreshScreen:
+            # ^ Did the user request a pause display?
+            NftStats.FreezeSplitNftOutput = NftStats.LastSplitNftOutput
+                # ^ Use this for display, allowing pause mode scroll while still updating the stats in the background.
+                #   If output paused - the frozen status (NftStats.FreezeSplitNftOutput) doesn't update - allowing
+                #       the user to scroll the display without updates.
+
+        PopulateWindows()
+        DisplayWindows()
+
+        if GlobalConfig.RefreshScreen:
+            time.sleep(GlobalConfig.RefreshPeriod)
+            # ^ Only sleep in refresh mode (not paused) - this will allow the user to scroll the display
+            #       without delays.
+
+        if GlobalConfig.ExitProgram:
+            break
+
+
+def LogLastSplitNftOutput():
+    for Looper in NftStats.LastSplitNftOutput:
+        LogWrite.debug('Looper == {}'.format(Looper))
 
 
 def LoadConfigFile():
@@ -298,40 +760,71 @@ def LoadConfigFile():
     LogWrite.debug('Found config file: FileLooper == {}'.format(FileLooper))
 
     with open (FileLooper, 'r') as ConfigFileToRead:
-        LoadedServersDict = yaml.safe_load(ConfigFileToRead)
+        LoadedConfigDict = yaml.safe_load(ConfigFileToRead)
             # ^ yaml.load is not safe
-        # ^ Now we have the nccm.yml file loaded into LoadedServersDict.
+        # ^ Now we have the nccm.yml file loaded into LoadedConfigDict.
         #   This is both the ssh connections details as well as the
         #   nccm_config_* items - all in the same dict.
 
-    LogWrite.debug('LoadedServersDict (contains prog settings + conn details) == {}'
-            .format(LoadedServersDict))
+    LogWrite.debug('LoadedConfigDict (contains prog settings + conn details) == {}'
+            .format(LoadedConfigDict))
         # ^ This dump will have program config + connection config details.
         #   Soon we will pop out the program config items.
 
-    LogWrite.debug('Extracting program configs from LoadedServersDict ...')
+    LogWrite.debug('Extracting program configs from LoadedConfigDict ...')
 
     # Handle loading of the NftCommandLine setting:
-    GlobalConfig.NftCommandLine = LoadedServersDict.pop(
+    GlobalConfig.NftCommandLine = LoadedConfigDict.pop(
         'nftwatch_config_NftCommandLine', 'none').lower()
     LogWrite.debug('Loaded {} config item:  NftCommandLine == {}'
         .format(GlobalConfig.ConfigFile, GlobalConfig.NftCommandLine))
 
     # Handle loading of the RefreshPeriod setting:
-    GlobalConfig.RefreshPeriod = int(LoadedServersDict.pop(
-        'nftwatch_config_NftCommandLine', '2'))
+    GlobalConfig.RefreshPeriod = float(LoadedConfigDict.pop(
+        'nftwatch_config_RefreshPeriod', '2'))
     LogWrite.debug('Loaded {} config item:  RefreshPeriod == {}'
         .format(GlobalConfig.ConfigFile, GlobalConfig.RefreshPeriod))
 
+    # Handle loading of the DisplayHandle setting:
+    GlobalConfig.DisplayHandle = LoadedConfigDict.pop(
+        'nftwatch_config_DisplayHandle:', True)
+    LogWrite.debug('Loaded {} config item:  DisplayHandle == {}'
+        .format(GlobalConfig.ConfigFile, GlobalConfig.DisplayHandle))
+
+    # Handle loading of the TruncateComment setting:
+    GlobalConfig.TruncateComment = int(LoadedConfigDict.pop(
+        'nftwatch_config_TruncateComment', '0'))
+    LogWrite.debug('Loaded {} config item:  TruncateComment == {}'
+        .format(GlobalConfig.ConfigFile, GlobalConfig.TruncateComment))
+
+    # Handle loading of the TruncateDetails setting:
+    GlobalConfig.TruncateDetails = int(LoadedConfigDict.pop(
+        'nftwatch_config_TruncateDetails', '0'))
+    LogWrite.debug('Loaded {} config item:  TruncateDetails == {}'
+        .format(GlobalConfig.ConfigFile, GlobalConfig.TruncateDetails))
+
+    # Handle loading of the DisplayMode setting:
+    GlobalConfig.DisplayMode = LoadedConfigDict.pop(
+        'nftwatch_config_DisplayMode', 'human').lower()
+    LogWrite.debug('Loaded {} config item:  DisplayMode == {}'
+        .format(GlobalConfig.ConfigFile, GlobalConfig.DisplayMode))
 
 
+def RestoreTerminal(stdscr):
+    ''' Restore the terminal to a sane status '''
+
+    curses.curs_set(1)          # Restore blinking cursor
+    curses.echo()               # Restore terminal echo
+    stdscr.keypad(False)        # Return special keys to normal
+    curses.noraw()              # Return raw mode to normal
+    curses.endwin()             # End curses session
 
 
 def SetupCurses(stdscr):
     ''' Put all pre-run tests here. Any failure will exit the program. '''
 
     LogWrite.debug('Function SetupCurses started')
-    curses.curs_set(1)          # Enable the blinking cursor
+    curses.curs_set(0)          # Completely hide the cursor
     curses.noecho()             # Disable echo to the terminal
     stdscr.keypad(True)
         # ^ Get special keys support in stdscr. Per window setting also required
@@ -342,13 +835,19 @@ def SetupCurses(stdscr):
         # ^ Used by the help menu shortcut key display
     curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)
         # ^ Used by the help menu shortcut key help test
-    curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_BLUE)
+    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLUE)
         # Used by the text box as supplied to:  class TextBox
     curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_RED)
         # ^ Used by the marker line controlled by the arrows
     curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_RED)
         # ^ Used for setting alerts such as 'LogPrv'
-    curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    curses.init_pair(6, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+        # ^ Used for setting alerts such as 'LogTee'
+    curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLACK)
+        # ^ Used for setting alerts such as 'LogTee'
+    curses.init_pair(8, curses.COLOR_RED, curses.COLOR_BLACK)
+        # ^ Used for setting alerts such as 'LogTee'
+    curses.init_pair(9, curses.COLOR_GREEN, curses.COLOR_BLACK)
         # ^ Used for setting alerts such as 'LogTee'
 
     if not curses.has_colors(): # Color not supported
@@ -361,6 +860,11 @@ def SetupCurses(stdscr):
     LogWrite.debug('GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}'
         .format(GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth))
 
+    GlobalConfig.MaxScreenLines = ( GlobalConfig.ScreenHeight - 2 )
+    GlobalConfig.DetailsWidth = ( GlobalConfig.ScreenWidth - GlobalConfig.CountersWidth - 1 )
+    LogWrite.debug('GlobalConfig.MaxScreenLines == {} , GlobalConfig.DetailsWidth == {}'
+        .format(GlobalConfig.MaxScreenLines, GlobalConfig.DetailsWidth))
+
     if GlobalConfig.ScreenWidth < 60 or GlobalConfig.ScreenHeight < 15:
         RestoreTerminal(stdscr)
         print('\nnccm: Window must be at least 60x15\n')
@@ -372,14 +876,222 @@ def SetupCurses(stdscr):
     LogWrite.debug('Function SetupCurses should have completed successfully')
 
 
+def SetupWindows(stdscr):
+    ''' Create the various windows '''
+
+    LogWrite.debug('Function SetupWindows started - create the various windows')
+
+    # Build the various windows:
+
+    # Build the help box:
+    Windows.HelpBox = curses.newwin(1, 28, GlobalConfig.ScreenHeight-1, 0)
+
+    for Looper in GlobalConfig.HelpMenuItems:
+        Windows.HelpBox.addstr('  '+Looper, curses.color_pair(1))
+        Windows.HelpBox.addstr('-'+GlobalConfig.HelpMenuItems[Looper], curses.color_pair(2))
+
+    # Build the status box:
+    Windows.StatusBox = curses.newwin(1, 30, GlobalConfig.ScreenHeight-1, 30)
+    Windows.StatusBox.addstr('R='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
+        # ^ This is the refresh (pause in reverse) status
+    Windows.StatusBox.addstr('  S='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
+        # ^ This is the sleep time between refreshes
+
+    Windows.HelpBox.keypad(True)
+        # ^ Get special keys support for this window.
+        #   Calling 'stdscr.keypad(True)' is different and doesn't reflect
+        #   in windows - it must be called separately.
+        #   Very important - otherwise stuff like getch return stuff like arrow keys
+        #   in multiple bytes (one per call) and it's screwed up.
+
+    LogWrite.debug('Help box built')
+
+    # Build the counters title box:
+    #   Example of title max char length as follows:
+    #   1234  123 K  456 M  123 K  456 M
+    #       This equates to 32 chars which I fixed into:  GlobalConfig.CountersWidth
+    Windows.CountersTitleBox = curses.newwin(1, GlobalConfig.CountersWidth, 0, 0)
+    Windows.CountersTitleBox.addstr('LINE  HNDL  PKTS   BYTES  PPS    BPS', curses.color_pair(3))
+    LogWrite.debug('Counters title box built')
+
+    # Build the counters output box:
+    Windows.CountersOutputBox = curses.newwin(GlobalConfig.MaxScreenLines, GlobalConfig.CountersWidth, 1, 0)
+    LogWrite.debug('Counters output box built')
+
+    # Build the details title box:
+    Windows.DetailsTitleBox = curses.newwin(1, GlobalConfig.DetailsWidth, 0, GlobalConfig.CountersWidth)
+    #Windows.DetailsTitleBox.addstr('COMMENT & DETAILS', curses.color_pair(3))
+
+    # Setup a string with the title of the:  comments & details  window:
+    DetailsStr = ('{:<{ColWidth}}'
+        .format(
+            'COMMENT & DETAILS',
+            ColWidth = ( GlobalConfig.DetailsWidth - 1 ) ))
+    #LogWrite.debug('DetailsStr == "{}"'.format(DetailsStr))
+
+    # Now use the string we created above to create the title box:
+    Windows.DetailsTitleBox.addstr(DetailsStr, curses.color_pair(3))
+        # ^ todo - this needs to respect the max column width
+    LogWrite.debug('Details title box built')
+
+    # Build the details output box:
+    Windows.DetailsOutputBox = curses.newwin(GlobalConfig.MaxScreenLines, GlobalConfig.DetailsWidth, 1, GlobalConfig.CountersWidth)
+    LogWrite.debug('Details output box built')
+
+    DisplayWindows()
+    LogWrite.debug('Function SetupWindows ended')
+
+
+def PopulateWindows():
+
+    Windows.CountersOutputBox.erase()
+    Windows.DetailsOutputBox.erase()
+    Windows.StatusBox.erase()
+    CounterString = ''
+
+
+    for Looper in range(GlobalConfig.VerticalOffset, ( GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 ) ):
+
+        if GlobalConfig.DisplayMode == 'human':
+
+            CounterString = ( '{:<6}{:<6}{:<7}{:<7}{:<7}{:<7}\n'
+                .format(
+                    str(Looper),
+                    NftStats.FreezeSplitNftOutput[Looper]['HandleText'],
+                    NftStats.FreezeSplitNftOutput[Looper]['HumanPacketsText'],
+                    NftStats.FreezeSplitNftOutput[Looper]['HumanBytesText'],
+                    NftStats.FreezeSplitNftOutput[Looper]['HumanPPSText'],
+                    NftStats.FreezeSplitNftOutput[Looper]['HumanBPSText']) )
+
+            Windows.CountersOutputBox.addstr(str(CounterString), curses.color_pair(7))
+                # ^ The counters have a fixed width and do not scroll. Therefore we can
+                #       immediately add it to the curses window.
+
+            FullCommentText = NftStats.FreezeSplitNftOutput[Looper]['CommentText'][0:GlobalConfig.TruncateComment].ljust((GlobalConfig.TruncateComment + 2), ' ')
+            # ^ The +2 at the end is required for a small space before the beginning of the next field.
+            #   Here we collect the first n chars of the comment in case the config file
+            #       said to truncate it.
+
+            DetailsString = FullCommentText + NftStats.FreezeSplitNftOutput[Looper]['LeadingWhitespace'] + NftStats.FreezeSplitNftOutput[Looper]['DetailsText']
+                # ^ This generates the entire length of the comment+details string
+
+            DetailsString = DetailsString[0:GlobalConfig.DetailsWidth - 1] + '\n'
+                # ^ Now truncate it to the width of the details window
+
+            Windows.DetailsOutputBox.addstr(str(DetailsString), curses.color_pair(7))
+
+    Windows.StatusBox.addstr('P='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
+    Windows.StatusBox.addstr('  S='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
+
+
+def DisplayWindows():
+    # Prepare the various windows for display:
+    Windows.HelpBox.noutrefresh()
+    Windows.StatusBox.noutrefresh()
+    Windows.CountersTitleBox.noutrefresh()
+    Windows.CountersOutputBox.noutrefresh()
+    Windows.DetailsTitleBox.noutrefresh()
+    Windows.DetailsOutputBox.noutrefresh()
+
+    curses.doupdate()
+        # ^ Speed up display and avoid flickering by using 'window.noutrefresh'
+        #   This command actually displays the windows we prepared earlier.
+
+    #LogWrite.debug('Menus should be displayed at this stage')
+        # ^ Too much logging
+
+
 def MainCursesFunction(stdscr):
 
-    LogWrite.debug('Function MainCursesFunction started')
+    LogWrite.debug('Function MainCursesFunction started. stdscr == {}'.format(stdscr))
 
     if SetupCurses(stdscr) == False:
         # ^ Something failed in setup or tests
         LogWrite.error('SetupCurses(stdscr) failed')
         return
+
+    SetupWindows(stdscr)
+
+    while True:
+
+        UserKey = Windows.HelpBox.getch()
+        #UserKey = stdscr.getch()
+            # ^ Do not use getch on stdscr - this causes display to disappear.
+            #   It must be run on one of the windows that has:  xxx.keypad(True)  configured.
+            #   I set it here:   Windows.HelpBox.keypad(True)  so use HelpBox for the reader.
+            #   Per the docs here:  https://docs.python.org/3/howto/curses.html  - getch
+            #       refreshes the screen and then waits for input. But we have windows, not only
+            #       the main stdscr screen, so refreshing stdscr will make the display disappear.
+        LogWrite.debug('UserKey == {}'.format(UserKey))
+
+        if UserKey in [17, 113]:
+            # ^ ctrl-q or q key to Quit
+            GlobalConfig.ExitProgram = True
+            LogWrite.info('User requested quit program. Cleaning up and exiting ...')
+            sys.exit(0)
+
+        elif UserKey == 112:
+            # ^ p key to Pause output
+            GlobalConfig.RefreshScreen = not GlobalConfig.RefreshScreen
+                # ^ Flip the setting
+
+        elif UserKey == 102:
+            # ^ f key to make display update Faster (halve:  GlobalConfig.RefreshPeriod)
+            GlobalConfig.RefreshPeriod = ( GlobalConfig.RefreshPeriod / 2 )
+            LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
+
+        elif UserKey == 115:
+            # ^ s key to make display update Slower (double:  GlobalConfig.RefreshPeriod)
+            GlobalConfig.RefreshPeriod = ( GlobalConfig.RefreshPeriod * 2 )
+            LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
+
+        elif UserKey == 258:
+            # ^ arrow down key
+            if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + GlobalConfig.MaxScreenLines ):
+                # ^ Are there enough lines below to allow scroll down by one line?
+                GlobalConfig.VerticalOffset += 1
+                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+
+        elif UserKey == 259:
+            # ^ arrow up key
+            if GlobalConfig.VerticalOffset > 0:
+                # ^ Are there enough lines below to allow scroll up by one line?
+                GlobalConfig.VerticalOffset -= 1
+                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+
+        elif UserKey == 262:
+            # ^ home key
+            GlobalConfig.VerticalOffset = 0
+            LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+
+        elif UserKey == 360:
+            # ^ end key
+            GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
+            LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+
+        elif UserKey == 338:
+            # ^ page down key
+            if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + GlobalConfig.MaxScreenLines ):
+                # ^ Are there enough lines below to allow page down?
+                if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + ( GlobalConfig.MaxScreenLines * 2 ) ):
+                    GlobalConfig.VerticalOffset += ( GlobalConfig.MaxScreenLines - 1 )
+                else:
+                    GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
+                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+
+        elif UserKey == 339:
+            # ^ page up key
+            if GlobalConfig.VerticalOffset > 0:
+                # ^ Are there enough lines above to allow page up?
+                if GlobalConfig.VerticalOffset >= ( GlobalConfig.MaxScreenLines ):
+                #if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset - GlobalConfig.MaxScreenLines ):
+                    GlobalConfig.VerticalOffset -= ( GlobalConfig.MaxScreenLines - 1 )
+                else:
+                    GlobalConfig.VerticalOffset = 0
+                LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+
+        #DisplayWindows()
+            # ^ Probably not needed
 
 
 def InitialLogging():
@@ -488,8 +1200,13 @@ def main(*args):
         # ^ Moved it after ParseArgs so that we have debugging info logged if
         #   started using 'nccm -d' .
     LoadConfigFile()
-    curses.wrapper(MainCursesFunction)
 
+    # Start nft reading thread now:
+    NftReadThread = threading.Thread(target = ReadNftOutput)
+    LogWrite.debug('About to start NftReadThread == {}'.format(NftReadThread))
+    NftReadThread.start()
+
+    curses.wrapper(MainCursesFunction)
 
 
 if __name__ == '__main__':
