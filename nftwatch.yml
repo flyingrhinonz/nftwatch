@@ -1,11 +1,10 @@
 ---
 
-# intro goes here
-
 # nftwatch internal configs:
 
 nftwatch_config_NftCommandLine: '/usr/sbin/nft -nn --handle list ruleset'
 # ^ The command line used to read the nftables output.
+
 
 nftwatch_config_RefreshPeriod: 2
 # ^ Refresh the display every n seconds.
@@ -15,10 +14,8 @@ nftwatch_config_RefreshPeriod: 2
 #   Bigger values (slower refreshes) raises your chances of seeing stats from
 #     low bandwidth machines (at higher speeds they will only show up briefly).
 
-nftwatch_config_DisplayHandle: true
-# ^ Display the rule handle?
 
-nftwatch_config_TruncateComment: 40
+nftwatch_config_TruncateComment: 32
 # ^ Truncate comment field length to max n chars
 #   Supported values:
 #     0 or False  to disable comment display
@@ -27,16 +24,24 @@ nftwatch_config_TruncateComment: 40
 #   Best to show enough chars of the comment to understand what you meant
 #     but not too many as to lose the rules either.
 
+
 nftwatch_config_TruncateDetails: 40
 # ^ Truncate details field length to max n chars
 #   Supported values:
 #     Any value >= 1 for the number of chars to display.
 #     False  or 0  to display the full details field.
+#   As of now - this item is not used.
+
 
 nftwatch_config_DisplayMode: human
 # ^ Controls the display mode. Supported values:
 #     human   Counters are truncated to human readable values.
 #     full    Counters are displayed in full.
 #     fullc   Counters are displayed in full, comma separated at the thousands mark.
+#   As of now - this item is not used and only human display is supported.
 
+
+nftwatch_config_DisplayHandle: true
+# ^ Display the rule handle?
+#   As of now - this item is not used and is always displayed.
 

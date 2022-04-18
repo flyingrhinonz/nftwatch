@@ -3,7 +3,112 @@
 
 
 '''
-todo - intro goes here
+nftwatch
+========
+
+Copyright (C) 2021-2022 Kenneth Aaron.
+
+flyingrhino AT orcon DOT net DOT nz
+
+Freedom makes a better world: released under GNU GPLv3.
+
+https://www.gnu.org/licenses/gpl-3.0.en.html
+
+This software can be used by anyone at no cost, however,
+if you like using my software and can support - please
+donate money to a children's hospital of your choice.
+
+This program is free software: you can redistribute it
+and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation:
+GNU GPLv3. You must include this entire text with your
+distribution.
+
+This program is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE.
+See the GNU General Public License for more details.
+
+
+About nftwatch
+--------------
+
+* Shows nftables policy in a more readable format.
+* Live counters table.
+* User-configurable refresh speed
+* Pause display refresh
+
+
+Manual install instructions
+---------------------------
+
+* Clone/download the project from the git repository.
+* Copy:  /etc/nftwatch.yml
+* Copy:  /usr/local/bin/nftwatch  and:  +x  it.
+* nftwatch  with no args to run it.
+* nftwatch -m  for this man page.
+
+
+Configuring nftwatch
+--------------------
+
+Some configs are in:  /etc/nftwatch.yml  . Others are
+hardcoded into the code - subject to improvement.
+
+
+Controls
+--------
+
+nftwatch is designed for interactive use. Simply run it
+and it will start displaying your nftables stats.
+
+The following keyboard controls are available:
+
+- f:                Speed up the display refresh
+- s:                Slow down the display refresh
+- p:                Pause the display refresh
+- Up/Down arrows:   Scroll the table up/down
+- Home/End:         Jump to table top/bottom
+- PgUp/PgDn:        Page up/down in the table
+- Space:            Same as page down
+- Ctrl-q or q:      Quit
+
+
+Man page
+--------
+
+* nftwatch -m  for this man page.
+
+
+Troubleshooting
+---------------
+
+Increase the logging verbosity with:  nftwatch -d
+or permanently increase it in the code by changing this
+line:  LogLevel = logging.DEBUG
+Check journalctl for nftwatch logs.
+
+
+Limitations
+-----------
+
+- This is the first release of nftwatch.
+- There could be bugs.
+- It can be improved.
+- Features can be added.
+- nftwatch is tied to the nft output. Any changes in nft
+output will break nftwatch.
+- Supports up to 9999 lines and handles before display may
+get messed up. Should be enough for most use cases though.
+
+I initially wrote nftwatch because I wanted a realtime
+running output from nftables that was better than simply
+looping it through:  `watch`. As of now - nftwatch serves
+its purpose. Let's see what feature requests I receive and
+if nftwatch can be improved for more use cases.
+
+
 '''
 
 # Standard library imports:
@@ -40,7 +145,7 @@ import yaml         # Requires: 'pip3 install --user PyYAML'
 # Beginning of logging setup section:
 
 # Variables that control logging:
-LogLevel = logging.DEBUG
+LogLevel = logging.INFO
     # ^ Initial log level of this program.
     #       Edit this if you want to change the initial log level.
     #       Supported levels: DEBUG, INFO, WARNING, ERROR, CRITICAL .
@@ -79,8 +184,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.1'
-VersionDate     = '2022-04-17'
+__version__     = '1.0.2'
+VersionDate     = '2022-04-18'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -285,8 +390,8 @@ class GlobalConfig:
         # ^ Width of the details output
 
     HelpMenuItems = collections.OrderedDict((
-        ( 'ctrl-h',     'Help' ),
-        ( 'ctrl-q',     'Quit' ),
+        #( 'ctrl-h',     'Help' ),
+        ( 'q',     'Quit' ),
     ))
 
     VerticalOffset = 0
@@ -950,14 +1055,18 @@ def SetupWindows(stdscr):
     # Build the various windows:
 
     # Build the help box:
-    Windows.HelpBox = curses.newwin(1, 28, GlobalConfig.ScreenHeight-1, 0)
+    Windows.HelpBox = curses.newwin(1, 10, GlobalConfig.ScreenHeight-1, 0)
+        # ^ curses.newwin(nlines, ncols, begin_y, begin_x)
 
     for Looper in GlobalConfig.HelpMenuItems:
         Windows.HelpBox.addstr('  '+Looper, curses.color_pair(1))
         Windows.HelpBox.addstr('-'+GlobalConfig.HelpMenuItems[Looper], curses.color_pair(2))
 
     # Build the status box:
-    Windows.StatusBox = curses.newwin(1, 30, GlobalConfig.ScreenHeight-1, 30)
+    Windows.StatusBox = curses.newwin(1, 45, GlobalConfig.ScreenHeight-1, 12)
+        # ^ curses.newwin(nlines, ncols, begin_y, begin_x)
+        #   If you overrun this window you get this error:
+        #       _curses.error: addwstr() returned ERR
     Windows.StatusBox.addstr('Update='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
         # ^ This is the refresh (pause in reverse) status
     Windows.StatusBox.addstr('  Sleep='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
@@ -986,12 +1095,12 @@ def SetupWindows(stdscr):
 
     # Build the details title box:
     Windows.DetailsTitleBox = curses.newwin(1, GlobalConfig.DetailsWidth, 0, GlobalConfig.CountersWidth)
-    #Windows.DetailsTitleBox.addstr('COMMENT & DETAILS', curses.color_pair(3))
+    #Windows.DetailsTitleBox.addstr('COMMENTS & DETAILS', curses.color_pair(3))
 
     # Setup a string with the title of the:  comments & details  window:
     DetailsStr = ('{:<{ColWidth}}'
         .format(
-            'COMMENT & DETAILS',
+            'COMMENTS & DETAILS',
             ColWidth = ( GlobalConfig.DetailsWidth - 1 ) ))
     #LogWrite.debug('DetailsStr == "{}"'.format(DetailsStr))
 
@@ -1093,14 +1202,14 @@ def MainCursesFunction(stdscr):
             #   Per the docs here:  https://docs.python.org/3/howto/curses.html  - getch
             #       refreshes the screen and then waits for input. But we have windows, not only
             #       the main stdscr screen, so refreshing stdscr will make the display disappear.
-        #LogWrite.debug('UserKey == {}'.format(UserKey))
+        LogWrite.debug('UserKey == {}'.format(UserKey))
 
         if UserKey in [17, 113]:
             # ^ ctrl-q or q key to Quit
             GlobalConfig.ExitProgram = True
             GlobalConfig.SkipSleep = True
             LogWrite.info('User requested quit program. Cleaning up and exiting ...')
-            sys.exit(0)
+            break
 
         elif UserKey == 112:
             # ^ p key to Pause output
@@ -1171,6 +1280,22 @@ def MainCursesFunction(stdscr):
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
             GlobalConfig.ForceScreenRedraw = True
 
+        # Check if the window was resized since it was started:
+        NewScreenHeight, NewScreenWidth = stdscr.getmaxyx()
+            # ^ Reading getmaxyx is done on the object:  stdscr  which is generated
+            #       by:  curses.wrapper  .
+        LogWrite.debug('class Connections, method: Display: '
+            'NewScreenHeight == {} , NewScreenWidth == {} '
+                .format(NewScreenHeight, NewScreenWidth))
+
+        if NewScreenHeight != GlobalConfig.ScreenHeight or NewScreenWidth != GlobalConfig.ScreenWidth:
+            RestoreTerminal(stdscr)
+            print('\nnftwatch: Resizing the window is not supported.\n\n')
+            LogWrite.warning('Resizing the window is not supported')
+            GlobalConfig.ExitProgram = True
+            GlobalConfig.SkipSleep = True
+            break
+
 
 def InitialLogging():
     ''' Put any useful logging here - such as startup env details.
@@ -1207,6 +1332,15 @@ def InitialLogging():
     if not SecureLogging:
         LogWrite.warning('Attention:  SecureLogging == False  -->  '
             'sensitive information will be logged to syslog/journal !')
+
+
+def DisplayHelp():
+    ''' Display the help text '''
+
+    LogWrite.debug('Displaying help...')
+    pydoc.pipepager(__doc__, cmd='less -i --dumb --no-init')
+        # ^ Print the text in through the less pager
+        #   so we can get paging, search, etc
 
 
 def ParseArgs():
@@ -1264,11 +1398,11 @@ def ParseArgs():
 
     if args.man:
         DisplayHelp()
-        sys.exit(0)
+        return
 
     if args.version:
         print(__version__)
-        sys.exit(0)
+        return
 
 
 def main(*args):
@@ -1277,6 +1411,12 @@ def main(*args):
     InitialLogging()
         # ^ Moved it after ParseArgs so that we have debugging info logged if
         #   started using 'nccm -d' .
+
+    if not getpass.getuser() == 'root':
+        print('nftwatch must be run as root because nft requires root to read stats')
+        LogWrite.warning('nftwatch must be run as root because nft requires root to read stats')
+        return
+
     LoadConfigFile()
 
     # Start nft reading thread now:
@@ -1285,6 +1425,8 @@ def main(*args):
     NftReadThread.start()
 
     curses.wrapper(MainCursesFunction)
+        # ^ This wrapper creates:  stdscr  that is passed to the function:  MainCursesFunction .
+        #   Documented here:  https://docs.python.org/3/library/curses.html  under:  curses.wrapper
 
 
 if __name__ == '__main__':
