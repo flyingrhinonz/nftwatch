@@ -55,8 +55,16 @@ Manual install instructions
 Configuring nftwatch
 --------------------
 
-Some configs are in:  /etc/nftwatch.yml  . Others are
-hardcoded into the code - subject to improvement.
+Some configs are in:  nftwatch.yml
+Others are hardcoded into the code - subject to improvement.
+Config file will be loaded from these paths - whichever
+is found first. If no config file is found - builtin
+defaults will be used.
+
+* ~/.config/nftwatch/nftwatch.yml
+* ~/.nftwatch.yml
+* ~/nftwatch.yml
+* /etc/nftwatch.yml
 
 
 Controls
@@ -186,8 +194,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.2'
-VersionDate     = '2022-04-18'
+__version__     = '1.0.3'
+VersionDate     = '2022-04-20'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -308,13 +316,13 @@ LogWrite.setLevel(LogLevel)
     # ^ Set this to logging.DEBUG or logging.WARNING for your INITIAL desired log level.
     #   Config file (nftwatch.yml) log level takes over from when it is loaded,
     #   This value controls logging verbosity until then so if you really want
-    #       debug level logging throughout your session, use 'nccm -d' .
+    #       debug level logging throughout your session, use 'nftwatch -d' .
     #   If you need to see verbose logging BEFORE the nftwatch.yml is loaded (which
     #       overrides this setting), make it DEBUG here. Well - don't actually edit it
     #       here, but edit it in the earlier section 'Variables that control logging'
     #       where the variable 'LogLevel' is configured.
     #   This will also let you troubleshoot problems that occur in the initial stages
-    #       of nccm run - before the nftwatch.yml file is loaded.
+    #       of nftwatch run - before the nftwatch.yml file is loaded.
 
 LogWrite.propagate = False
     # ^ Prevents duplicate logging by ancestor loggers (if any)
@@ -356,12 +364,12 @@ LogWriteFormatter = logging.Formatter(
     #               {}[%(process)d]:
 
     # Example:
-    #   Dec 29 14:35:29 asus303 nccm[31470]: <DEBUG> (2020-12-29 14:35:29.048 ,
+    #   Dec 29 14:35:29 asus303 nftwatch[31470]: <DEBUG> (2020-12-29 14:35:29.048 ,
     #   PN: MainProcess , MN: cm , FN: SetupWindows , LI: 1268 , TN: MainThread):
     #   ConnectionsList window built
 
 LogHandler.setFormatter(LogWriteFormatter)
-LogWrite.debug('nccm started with log level == {} as set by '
+LogWrite.debug('nftwatch started with log level == {} as set by '
     'LogWrite.setLevel (hardcoded in the script)'
         .format(LogWrite.getEffectiveLevel()))
     # ^ Note - this only gets logged if debug level is set in the script
@@ -428,8 +436,8 @@ class GlobalConfig:
     ConfigFile = 'nftwatch.yml'
     ConfigFilePath = []
         # ^ Try to load nftwatch.yml from these paths whichever is found first
-    ConfigFilePath.append(str(pathlib.Path.home()) + '/.config/nccm/' + ConfigFile)
-        # ^ ~/.config/nccm/nftwatch.yml
+    ConfigFilePath.append(str(pathlib.Path.home()) + '/.config/nftwatch/' + ConfigFile)
+        # ^ ~/.config/nftwatch/nftwatch.yml
     ConfigFilePath.append(str(pathlib.Path.home()) + '/.' + ConfigFile)
         # ^ ~/.nftwatch.yml
     ConfigFilePath.append(str(pathlib.Path.home()) + '/' + ConfigFile)
@@ -446,7 +454,7 @@ class GlobalConfig:
     DisplayHandle = True
         # ^ Display the nftables rule handle.
 
-    TruncateComment = 0
+    TruncateComment = 40
         # ^ Truncate the comment text to this length, or 0 to disable truncation.
 
     TruncateDetails = 0
@@ -930,12 +938,18 @@ def LoadConfigFile():
     for FileLooper in GlobalConfig.ConfigFilePath:
         if pathlib.Path(FileLooper).exists():
             break
-    LogWrite.debug('Found config file: FileLooper == {}'.format(FileLooper))
+
+    # This block addresses issue #2 :
+    if pathlib.Path(FileLooper).exists():
+        LogWrite.debug('Found config file: FileLooper == {}'.format(FileLooper))
+    else:
+        LogWrite.info('nftwatch.yml config file not found in any of the paths - using builtin defaults')
+        return
 
     with open (FileLooper, 'r') as ConfigFileToRead:
         LoadedConfigDict = yaml.safe_load(ConfigFileToRead)
             # ^ yaml.load is not safe
-        # ^ Now we have the nccm.yml file loaded into LoadedConfigDict.
+        # ^ Now we have the nftwatch.yml file loaded into LoadedConfigDict.
         #   This is both the ssh connections details as well as the
         #   nccm_config_* items - all in the same dict.
 
@@ -1387,7 +1401,7 @@ def ParseArgs():
     if args.debug:
         LogWrite.setLevel(logging.DEBUG)
         GlobalConfig.ForceDebugLogging = True
-        LogWrite.debug('Received command line arg --debug forcing nccm '
+        LogWrite.debug('Received command line arg --debug forcing nftwatch '
             'to run in debug mode')
 
     LogWrite.debug('parser object = {}'.format(parser))
@@ -1412,11 +1426,13 @@ def main(*args):
     ParseArgs()     # Command line args processing happens here
     InitialLogging()
         # ^ Moved it after ParseArgs so that we have debugging info logged if
-        #   started using 'nccm -d' .
+        #   started using 'nftwatch -d' .
 
-    if not getpass.getuser() == 'root':
-        print('nftwatch must be run as root because nft requires root to read stats')
-        LogWrite.warning('nftwatch must be run as root because nft requires root to read stats')
+    #if not getpass.getuser() == 'root':
+    if not os.geteuid() == 0:
+        # ^ Addressing issue #1
+        print('nftwatch must be run as root (or sudo) because nft requires root to read stats')
+        LogWrite.warning('nftwatch must be run as root (or sudo) because nft requires root to read stats')
         return
 
     LoadConfigFile()

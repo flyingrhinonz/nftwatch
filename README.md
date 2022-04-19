@@ -51,8 +51,16 @@ Manual install instructions
 Configuring nftwatch
 --------------------
 
-Some configs are in:  /etc/nftwatch.yml  . Others are
-hardcoded into the code - subject to improvement.
+Some configs are in:  nftwatch.yml
+Others are hardcoded into the code - subject to improvement.
+Config file will be loaded from these paths - whichever
+is found first. If no config file is found - builtin
+defaults will be used.
+
+* ~/.config/nftwatch/nftwatch.yml
+* ~/.nftwatch.yml
+* ~/nftwatch.yml
+* /etc/nftwatch.yml
 
 
 Controls
