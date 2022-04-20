@@ -99,6 +99,13 @@ or permanently increase it in the code by changing this
 line:  LogLevel = logging.DEBUG
 Check journalctl for nftwatch logs.
 
+On rare occasions nftwatch exits and leaves the terminal
+messed up. Fix this by typing:  `reset`  in the terminal.
+I tried to fix this at the end of function:  main
+but I still see it happen 5% of the time when running fast
+refresh rates.
+If anyone knows a solution please tell me.
+
 
 Limitations
 -----------
@@ -109,7 +116,7 @@ Limitations
 - Features can be added.
 - nftwatch is tied to the nft output. Any changes in nft
 output will break nftwatch.
-- Supports up to 9999 lines and handles before display may
+- Supports up to 9999 lines/nft-handles before display may
 get messed up. Should be enough for most use cases though.
 
 I initially wrote nftwatch because I wanted a realtime
@@ -194,7 +201,7 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.4'
+__version__     = '1.0.5'
 VersionDate     = '2022-04-20'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
@@ -399,6 +406,9 @@ class GlobalConfig:
     DetailsWidth = 0
         # ^ Width of the details output
 
+    MiniSleep = 0.02
+        # ^ Allows breakout of loops which have bigger sleep times
+
     HelpMenuItems = collections.OrderedDict((
         #( 'ctrl-h',     'Help' ),
         ( 'q',     'Quit' ),
@@ -489,7 +499,8 @@ class GlobalConfig:
 
 
 class NftStats:
-    ''' Keep the raw and processed nft stats here '''
+    ''' Keep the raw and processed nft stats here.
+        Yet another global vars storage item. '''
 
     LastFullNftOutput = ''
         # ^ Raw output from reading nft rulebase
@@ -911,7 +922,7 @@ def SmartSleep():
         #       without delays.
 
     else:
-        if GlobalConfig.RefreshPeriod <= 0.02:
+        if GlobalConfig.RefreshPeriod <= GlobalConfig.MiniSleep:
             time.sleep(GlobalConfig.RefreshPeriod)
         else:
             while True:
@@ -925,8 +936,8 @@ def SmartSleep():
 
                 if GlobalConfig.SkipSleep:
                     break
-                time.sleep(0.02)
-                Counter += 0.02
+                time.sleep(GlobalConfig.MiniSleep)
+                Counter += GlobalConfig.MiniSleep
                 if Counter >= GlobalConfig.RefreshPeriod:
                     break
 
@@ -1162,7 +1173,7 @@ def PopulateWindows():
 
             CounterString = ( '{:<6}{:<6}{:<7}{:<7}{:<7}{:<7}\n'
                 .format(
-                    str(Looper),
+                    str(Looper+1),
                     NftStats.FreezeSplitNftOutput[Looper]['HandleText'],
                     NftStats.FreezeSplitNftOutput[Looper]['HumanPacketsText'],
                     NftStats.FreezeSplitNftOutput[Looper]['HumanBytesText'],
@@ -1462,6 +1473,22 @@ def main(*args):
     curses.wrapper(MainCursesFunction)
         # ^ This wrapper creates:  stdscr  that is passed to the function:  MainCursesFunction .
         #   Documented here:  https://docs.python.org/3/library/curses.html  under:  curses.wrapper
+
+    # Wait for:  NftReadThread  thread to exit (because it does screen draws).
+    #   curses.wrapper(...)  will cleanup the window and restore the terminal to sane conditions
+    #   but this can happen only after no more screen draws occur :
+
+    LogWrite.debug('NftReadThread alive status == {}'.format(NftReadThread.is_alive()))
+
+    for Looper in range (50):
+        if not NftReadThread.is_alive():
+            break
+        time.sleep (GlobalConfig.MiniSleep)
+
+    LogWrite.debug('NftReadThread alive status == {}'.format(NftReadThread.is_alive()))
+
+    # ^ Note - the block above is supposed to let curses restore the terminal to a sane
+    #       condition but it doesn't always happen. Need to figure out why.
 
 
 if __name__ == '__main__':

@@ -95,6 +95,13 @@ or permanently increase it in the code by changing this
 line:  LogLevel = logging.DEBUG
 Check journalctl for nftwatch logs.
 
+On rare occasions nftwatch exits and leaves the terminal
+messed up. Fix this by typing:  `reset`  in the terminal.
+I tried to fix this at the end of function:  main
+but I still see it happen 5% of the time when running fast
+refresh rates.
+If anyone knows a solution please tell me.
+
 
 Limitations
 -----------
@@ -105,7 +112,7 @@ Limitations
 - Features can be added.
 - nftwatch is tied to the nft output. Any changes in nft
 output will break nftwatch.
-- Supports up to 9999 lines and handles before display may
+- Supports up to 9999 lines/nft-handles before display may
 get messed up. Should be enough for most use cases though.
 
 I initially wrote nftwatch because I wanted a realtime
@@ -113,5 +120,4 @@ running output from nftables that was better than simply
 looping it through:  `watch`. As of now - nftwatch serves
 its purpose. Let's see what feature requests I receive and
 if nftwatch can be improved for more use cases.
-
 
