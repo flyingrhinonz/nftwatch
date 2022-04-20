@@ -34,15 +34,15 @@ About nftwatch
 
 * Shows nftables policy in a more readable format.
 * Live counters table.
-* User-configurable refresh speed
-* Pause display refresh
+* User-configurable refresh speed.
+* Pause display refresh.
 
 
 Manual install instructions
 ---------------------------
 
 * Clone/download the project from the git repository.
-* Copy:  /etc/nftwatch.yml
+* Copy:  /etc/nftwatch.yml    .
 * Copy:  /usr/local/bin/nftwatch  and:  +x  it.
 * nftwatch  with no args to run it.
 * nftwatch -m  for this man page.
@@ -51,11 +51,12 @@ Manual install instructions
 Configuring nftwatch
 --------------------
 
-Some configs are in:  nftwatch.yml
+Some configs are in:  `nftwatch.yml`    .
 Others are hardcoded into the code - subject to improvement.
 Config file will be loaded from these paths - whichever
 is found first. If no config file is found - builtin
 defaults will be used.
+It's safe to run nftwatch without a config file.
 
 * ~/.config/nftwatch/nftwatch.yml
 * ~/.nftwatch.yml
@@ -84,16 +85,25 @@ The following keyboard controls are available:
 Man page
 --------
 
-* nftwatch -m  for this man page.
+* `nftwatch -m`  for this man page.
+
+
+Usage tips
+----------
+
+* Slow down your display refresh rate to get more accurate
+results, as well as pickup rules that are rarely hit.
+* If you see something interesting - pause the display
+and scroll the table if needed.
 
 
 Troubleshooting
 ---------------
 
-Increase the logging verbosity with:  nftwatch -d
+Increase the logging verbosity with:  `nftwatch -d`
 or permanently increase it in the code by changing this
-line:  LogLevel = logging.DEBUG
-Check journalctl for nftwatch logs.
+line:  `LogLevel = logging.DEBUG`    .
+Check  `journalctl -f`  for nftwatch logs.
 
 On rare occasions nftwatch exits and leaves the terminal
 messed up. Fix this by typing:  `reset`  in the terminal.
