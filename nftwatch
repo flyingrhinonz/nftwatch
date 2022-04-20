@@ -194,7 +194,7 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.3'
+__version__     = '1.0.4'
 VersionDate     = '2022-04-20'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
@@ -521,6 +521,9 @@ class NftStats:
 
     LenPrevRead = 0
         # ^ Length of the:  PreviousSplitNftOutput  list
+
+    LenFreezeRead = 0
+        # ^ Length of the:  FreezeSplitNftOutput  list
 
 
 class Windows:
@@ -880,6 +883,9 @@ def ReadNftOutput():
             # ^ Did the user request a pause display?
             NftStats.FreezeSplitNftOutput = NftStats.LastSplitNftOutput
             NftStats.FreezeMaxLengths = NftStats.LastMaxLengths
+            NftStats.LenFreezeRead = len(NftStats.FreezeSplitNftOutput)
+            #LogWrite.debug('NftStats.LenFreezeRead == {}'.format(NftStats.LenFreezeRead))
+
                 # ^ Use this for display, allowing pause mode scroll while still updating the stats in the background.
                 #   If output paused - the frozen status (NftStats.FreezeSplitNftOutput) doesn't update - allowing
                 #       the user to scroll the display without updates.
@@ -1140,7 +1146,17 @@ def PopulateWindows():
     Windows.StatusBox.erase()
     CounterString = ''
 
-    for Looper in range(GlobalConfig.VerticalOffset, ( GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 ) ):
+    LinesToDisplay = min( ( GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 ), NftStats.LenFreezeRead )
+        # ^ Issue #3 - nftwatch crashes if table shorter than page height
+
+    #LogWrite.debug('GlobalConfig.VerticalOffset == {} , '
+    #    'GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 == {} , '
+    #    'NftStats.LenFreezeRead == {} , LinesToDisplay == {}'
+    #        .format(GlobalConfig.VerticalOffset,
+    #            ( GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 ),
+    #            NftStats.LenFreezeRead, LinesToDisplay ))
+
+    for Looper in range(GlobalConfig.VerticalOffset, LinesToDisplay):
 
         if GlobalConfig.DisplayMode == 'human':
 
@@ -1269,9 +1285,10 @@ def MainCursesFunction(stdscr):
 
         elif UserKey == 360:
             # ^ end key
-            GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
-            #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
-            GlobalConfig.ForceScreenRedraw = True
+            if ( NftStats.LenFreezeRead > ( GlobalConfig.ScreenHeight - 3 ) ):
+                GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+                GlobalConfig.ForceScreenRedraw = True
 
         elif UserKey in [32, 338]:
             # ^ page down key or space bar
