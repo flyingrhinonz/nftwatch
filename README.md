@@ -42,10 +42,10 @@ Manual install instructions
 ---------------------------
 
 * Clone/download the project from the git repository.
-* Copy:  /etc/nftwatch.yml    .
-* Copy:  /usr/local/bin/nftwatch  and:  +x  it.
-* nftwatch  with no args to run it.
-* nftwatch -m  for this man page.
+* Copy:  `/etc/nftwatch.yml`    .
+* Copy:  `/usr/local/bin/nftwatch`  and:  +x  it.
+* `nftwatch`  with no args to run it.
+* `nftwatch -m`  for this man page.
 
 
 Configuring nftwatch
@@ -91,10 +91,17 @@ Man page
 Usage tips
 ----------
 
-* Slow down your display refresh rate to get more accurate
-results, as well as pickup rules that are rarely hit.
 * If you see something interesting - pause the display
 and scroll the table if needed.
+* Add counters to your nftables rules if you want to see
+these values in nftwatch (by default rules don't have
+counters).
+* Slow down your display refresh rate to get more accurate
+results, as well as pickup rules that are rarely hit.
+At faster refresh rates your BPS/PPS rates will be
+higher than reality because the time it takes to read and
+calculate values is not accounted for (nftwatch uses
+simple division by refresh time per cycle).
 
 
 Troubleshooting
@@ -124,6 +131,13 @@ Limitations
 output will break nftwatch.
 - Supports up to 9999 lines/nft-handles before display may
 get messed up. Should be enough for most use cases though.
+- The first cycle after changing refresh speed will be
+incorrect; the second cycle onwards will be fine until
+you change refresh speed again.
+- nftwatch is not a performance measurement tool - there
+are a few factors that prevent the BPS and PPS rates from
+being accurate, but as a rules troubleshooting assistant -
+it is close enough to be useful.
 
 I initially wrote nftwatch because I wanted a realtime
 running output from nftables that was better than simply
