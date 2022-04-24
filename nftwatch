@@ -196,7 +196,8 @@ MaxLogLineLength = 700
     # ^ Wrap log lines longer than this many chars.
     #   Keep a sensible and usable limit.
 SysLogProgName = 'nftwatch'
-    # ^ This is how our program is identified in syslog
+    # ^ This is how our program is identified in syslog.
+    #       Use:  journalctl -f -t 'myprog'  to watch its logs.
 Indent = 8
     # ^ Wrapped lines are indented by n spaces to make
     #       logging easier to read.
@@ -224,14 +225,21 @@ SecureLogging = False
     #
     #   If you want simple logging - call LogWrite with a string:
     #       LogWrite.info('This will be logged as is')
+    #
+    #   You can also supply the dict:  'tee': "text to print"
+    #       which saves you writing two lines (one for print and one for logging)
+    #       per how you supply the dict (see the examples in the code later on):
+    #   LogWrite.info( { 'tee': 'The same line gets printed to display and logged.'} )
+    #   LogWrite.info( { 'tee': 'User line to display', 'safe': 'CENSORED line gets logged' } )
 
 
 # Program identification strings:
-__version__     = '1.0.8'
+__version__     = '1.0.9'
 VersionDate     = '2022-04-25'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
+License         = 'GPLv3'
 
 
 # This block handles logging to syslog:
@@ -262,11 +270,30 @@ class CustomHandler(logging.handlers.SysLogHandler):
             # ^ LogWrite was called with a dict - log either safe/unsafe
             #       per SecureLogging setting.
 
+            if 'tee' in record.msg:
+                # ^ Dict key == tee means print the message to screen, and later choose
+                #       which version gets logged.
+                print(record.msg['tee'])
+
             if SecureLogging:
-                record.msg = record.msg['safe']
+                # ^ In:  SecureLogging == True  mode - try to log the:  safe  value if found,
+                #       else log the:  tee  value:
+                if 'safe' in record.msg:
+                    record.msg = record.msg['safe']
+                else:
+                    record.msg = record.msg['tee']
+                    #record.msg = "No safe message was supplied."
+                        # ^ At the moment we are logging the:  tee  value if no:  safe  value is supplied,
+                        #       but a safer option could be to force log a notification string as in the
+                        #       commented out line - you choose which better suits you.
 
             else:
-                record.msg = record.msg['unsafe']
+                # ^ In:  SecureLogging == False  mode - try to log the:  unsafe  value if found,
+                #       else log the:  tee  value:
+                if 'unsafe' in record.msg:
+                    record.msg = record.msg['unsafe']
+                else:
+                    record.msg = record.msg['tee']
 
         if EnhancedLogging:
             # ^ We will split the supplied log line (record.msg) into multiple lines.
@@ -1077,8 +1104,7 @@ def SetupCurses(stdscr):
 
     if not curses.has_colors(): # Color not supported
         RestoreTerminal(stdscr)
-        print('\nnccm: This program requires color support\n')
-        LogWrite.warning('This program requires color support')
+        LogWrite.warning( { 'tee': '\nnftwatch requires color support\n' } )
         return False
 
     GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth = stdscr.getmaxyx()
@@ -1092,10 +1118,8 @@ def SetupCurses(stdscr):
 
     if GlobalConfig.ScreenWidth < 60 or GlobalConfig.ScreenHeight < 15:
         RestoreTerminal(stdscr)
-        print('\nnccm: Window must be at least 60x15\n')
-        LogWrite.warning('Window must be at least 60x15. '
-            'GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}'
-                .format(GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth))
+        LogWrite.warning( { 'tee': '\nnftwatch window must be at least 60x15. GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}\n'
+                .format(GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth) } )
         return False
 
     LogWrite.debug('Function SetupCurses should have completed successfully')
@@ -1355,8 +1379,7 @@ def MainCursesFunction(stdscr):
 
         if NewScreenHeight != GlobalConfig.ScreenHeight or NewScreenWidth != GlobalConfig.ScreenWidth:
             RestoreTerminal(stdscr)
-            print('\nnftwatch: Resizing the window is not supported.\n\n')
-            LogWrite.warning('Resizing the window is not supported')
+            LogWrite.warning( { 'tee': '\nResizing the window when nftwatch is active is not supported\n\n' } )
             GlobalConfig.ExitProgram = True
             GlobalConfig.SkipSleep = True
             break
@@ -1480,15 +1503,13 @@ def main(*args):
     #if not getpass.getuser() == 'root':
     if not os.geteuid() == 0:
         # ^ Addressing issue #1
-        print('nftwatch must be run as root (or sudo) because nft requires root to read stats')
-        LogWrite.warning('nftwatch must be run as root (or sudo) because nft requires root to read stats')
+        LogWrite.warning( { 'tee': 'nftwatch must be run as root (or sudo) because nft requires root to read stats' } )
         return
 
     LogWrite.debug('Python version == {}'.format(sys.version_info))
 
     if ( ( sys.version_info[0] < 3 ) and ( sys.version_info[1] < 6 ) ):
-        print('Requires python 3.6+')
-        LogWrite.warning('Requires python 3.6+')
+        LogWrite.warning( { 'tee': 'Requires python 3.6+' } )
         return
 
     LoadConfigFile()
