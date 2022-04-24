@@ -79,10 +79,12 @@ The following keyboard controls are available:
 - f:                Speed up the display refresh
 - s:                Slow down the display refresh
 - p:                Pause the display refresh
-- Up/Down arrows:   Scroll the table up/down
-- Home/End:         Jump to table top/bottom
-- PgUp/PgDn:        Page up/down in the table
-- Space:            Same as page down
+- Up arrow or N:    Scroll the table up
+- Down arrow or n:  Scroll the table down
+- Home or g:        Jump to table top
+- End or G:         Jump to table bottom
+- PgUp or b:        Page up in the table
+- PgDn or space:    Page down in the table
 - Ctrl-q or q:      Quit
 
 
@@ -225,8 +227,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.7'
-VersionDate     = '2022-04-22'
+__version__     = '1.0.8'
+VersionDate     = '2022-04-25'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -1291,30 +1293,30 @@ def MainCursesFunction(stdscr):
             #LogWrite.debug('GlobalConfig.RefreshPeriod == {}'.format(GlobalConfig.RefreshPeriod) )
             GlobalConfig.ForceScreenRedraw = True
 
-        elif UserKey == 258:
-            # ^ arrow down key
+        elif UserKey in [110, 258]:
+            # ^ arrow down key or n
             if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + GlobalConfig.MaxScreenLines ):
                 # ^ Are there enough lines below to allow scroll down by one line?
                 GlobalConfig.VerticalOffset += 1
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
             GlobalConfig.ForceScreenRedraw = True
 
-        elif UserKey == 259:
-            # ^ arrow up key
+        elif UserKey in [78, 259]:
+            # ^ arrow up key or N
             if GlobalConfig.VerticalOffset > 0:
                 # ^ Are there enough lines below to allow scroll up by one line?
                 GlobalConfig.VerticalOffset -= 1
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
             GlobalConfig.ForceScreenRedraw = True
 
-        elif UserKey == 262:
-            # ^ home key
+        elif UserKey in [103, 262]:
+            # ^ home key or g key
             GlobalConfig.VerticalOffset = 0
             #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
             GlobalConfig.ForceScreenRedraw = True
 
-        elif UserKey == 360:
-            # ^ end key
+        elif UserKey in [71, 360]:
+            # ^ end key or G key
             if ( NftStats.LenFreezeRead > ( GlobalConfig.ScreenHeight - 3 ) ):
                 GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
@@ -1331,8 +1333,8 @@ def MainCursesFunction(stdscr):
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
             GlobalConfig.ForceScreenRedraw = True
 
-        elif UserKey == 339:
-            # ^ page up key
+        elif UserKey in [98, 339]:
+            # ^ page up key or b key
             if GlobalConfig.VerticalOffset > 0:
                 # ^ Are there enough lines above to allow page up?
                 if GlobalConfig.VerticalOffset >= ( GlobalConfig.MaxScreenLines ):
