@@ -75,10 +75,12 @@ The following keyboard controls are available:
 - f:                Speed up the display refresh
 - s:                Slow down the display refresh
 - p:                Pause the display refresh
-- Up/Down arrows:   Scroll the table up/down
-- Home/End:         Jump to table top/bottom
-- PgUp/PgDn:        Page up/down in the table
-- Space:            Same as page down
+- Up arrow or N:    Scroll the table up
+- Down arrow or n:  Scroll the table down
+- Home or g:        Jump to table top
+- End or G:         Jump to table bottom
+- PgUp or b:        Page up in the table
+- PgDn or space:    Page down in the table
 - Ctrl-q or q:      Quit
 
 
