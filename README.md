@@ -75,6 +75,7 @@ The following keyboard controls are available:
 - f:                Speed up the display refresh
 - s:                Slow down the display refresh
 - p:                Pause the display refresh
+- .:                Toggles comment dot padding
 - Up arrow or N:    Scroll the table up
 - Down arrow or n:  Scroll the table down
 - Home or g:        Jump to table top
@@ -104,6 +105,9 @@ At faster refresh rates your BPS/PPS rates will be
 higher than reality because the time it takes to read and
 calculate values is not accounted for (nftwatch uses
 simple division by refresh time per cycle).
+* If short comments make it difficult to follow the line -
+toggle dot padding with:  `.`  to improve readability.
+Change will apply at next table redraw.
 
 
 Troubleshooting
