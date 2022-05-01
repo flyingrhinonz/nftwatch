@@ -76,6 +76,7 @@ The following keyboard controls are available:
 - s:                Slow down the display refresh
 - p:                Pause the display refresh
 - .:                Toggles comment dot padding
+- ,:                Toggles even more dot padding
 - Up arrow or N:    Scroll the table up
 - Down arrow or n:  Scroll the table down
 - Home or g:        Jump to table top
@@ -108,6 +109,8 @@ simple division by refresh time per cycle).
 * If short comments make it difficult to follow the line -
 toggle dot padding with:  `.`  to improve readability.
 Change will apply at next table redraw.
+And if this isn't enough:  `,`  will give you even more
+padding.
 
 
 Troubleshooting
@@ -150,4 +153,5 @@ running output from nftables that was better than simply
 looping it through:  `watch`. As of now - nftwatch serves
 its purpose. Let's see what feature requests I receive and
 if nftwatch can be improved for more use cases.
+
 

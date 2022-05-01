@@ -80,6 +80,7 @@ The following keyboard controls are available:
 - s:                Slow down the display refresh
 - p:                Pause the display refresh
 - .:                Toggles comment dot padding
+- ,:                Toggles even more dot padding
 - Up arrow or N:    Scroll the table up
 - Down arrow or n:  Scroll the table down
 - Home or g:        Jump to table top
@@ -112,6 +113,8 @@ simple division by refresh time per cycle).
 * If short comments make it difficult to follow the line -
 toggle dot padding with:  `.`  to improve readability.
 Change will apply at next table redraw.
+And if this isn't enough:  `,`  will give you even more
+padding.
 
 
 Troubleshooting
@@ -238,8 +241,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.10'
-VersionDate     = '2022-04-29'
+__version__     = '1.0.11'
+VersionDate     = '2022-04-30'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -557,6 +560,9 @@ class GlobalConfig:
     DotPadding = False
         # ^ Pad the comments line with dots - may help readability
 
+    MoreDotPadding = False
+        # ^ Pad the comments line with even more dots - may help readability
+
 
 class NftStats:
     ''' Keep the raw and processed nft stats here.
@@ -725,8 +731,8 @@ def ReadNftOutput():
             if Result:
                 LeadingWhitespaceResult = Result.group()
                 LeadingWhitespaceResult = LeadingWhitespaceResult.replace('\t', '    ')
-                    # ^ nftables supplies config blocks indented with tab (8 spaces) which is too much.
-                    #   Let's reduce it to 4 spaces.
+                # ^ nftables supplies config blocks indented with tab (8 spaces) which is too much.
+                #   Let's reduce it to 4 spaces.
 
             else:
                 LeadingWhitespaceResult = ''
@@ -959,8 +965,9 @@ def ReadNftOutput():
         PopulateWindows()
         DisplayWindows()
 
-        if GlobalConfig.RefreshScreen:
-            SmartSleep()
+        #if GlobalConfig.RefreshScreen:
+        # ^ I dont believe this check is required
+        SmartSleep()
 
         if GlobalConfig.ExitProgram:
             break
@@ -1242,15 +1249,20 @@ def PopulateWindows():
                 MaxCommentLen = NftStats.FreezeMaxLengths['MaxCommentTextLength']
             #LogWrite.debug('MaxCommentLen == {}'.format(MaxCommentLen))
 
-            if ( GlobalConfig.DotPadding ) and ( len(NftStats.FreezeSplitNftOutput[Looper]['CommentText']) > 0 ):
+            if GlobalConfig.MoreDotPadding:
+                FullCommentText = NftStats.FreezeSplitNftOutput[Looper]['CommentText'][0:MaxCommentLen].ljust((MaxCommentLen), '.')
+            elif ( GlobalConfig.DotPadding ) and ( len(NftStats.FreezeSplitNftOutput[Looper]['CommentText']) > 0 ):
                 FullCommentText = NftStats.FreezeSplitNftOutput[Looper]['CommentText'][0:MaxCommentLen].ljust((MaxCommentLen), '.')
                 # ^ Here we collect the first n chars of the comment in case the config file
                 #       said to truncate it.
             else:
                 FullCommentText = NftStats.FreezeSplitNftOutput[Looper]['CommentText'][0:MaxCommentLen].ljust((MaxCommentLen), ' ')
 
-            DetailsString = FullCommentText + NftStats.FreezeSplitNftOutput[Looper]['LeadingWhitespace'] + '  ' + NftStats.FreezeSplitNftOutput[Looper]['DetailsText']
-                # ^ This generates the entire length of the comment+details string
+            if GlobalConfig.MoreDotPadding:
+                DetailsString = FullCommentText + NftStats.FreezeSplitNftOutput[Looper]['LeadingWhitespace'].replace(' ', '.') + '  ' + NftStats.FreezeSplitNftOutput[Looper]['DetailsText']
+                    # ^ This generates the entire length of the comment+details string
+            else:
+                DetailsString = FullCommentText + NftStats.FreezeSplitNftOutput[Looper]['LeadingWhitespace'] + '  ' + NftStats.FreezeSplitNftOutput[Looper]['DetailsText']
 
             DetailsString = DetailsString[0:GlobalConfig.DetailsWidth - 1] + '\n'
                 # ^ Now truncate it to the width of the details window
@@ -1316,6 +1328,14 @@ def MainCursesFunction(stdscr):
         elif UserKey == 46:
             # ^ . key to use dot padding
             GlobalConfig.DotPadding = not GlobalConfig.DotPadding
+            if GlobalConfig.DotPadding:
+                GlobalConfig.MoreDotPadding = False
+
+        elif UserKey == 44:
+            # ^ , key to use more dot padding
+            GlobalConfig.MoreDotPadding = not GlobalConfig.MoreDotPadding
+            if GlobalConfig.MoreDotPadding:
+                GlobalConfig.DotPadding = False
 
         elif UserKey == 102:
             # ^ f key to make display update Faster (halve:  GlobalConfig.RefreshPeriod)
