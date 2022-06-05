@@ -204,7 +204,7 @@ MaxLogLineLength = 700
     #   Keep a sensible and usable limit.
 SysLogProgName = 'nftwatch'
     # ^ This is how our program is identified in syslog.
-    #       Use:  journalctl -f -t 'myprog'  to watch its logs.
+    #       Use:  journalctl -f -t 'nftwatch'  to watch its logs.
 Indent = 8
     # ^ Wrapped lines are indented by n spaces to make
     #       logging easier to read.
@@ -241,8 +241,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.11'
-VersionDate     = '2022-04-30'
+__version__     = '1.0.12'
+VersionDate     = '2022-05-07'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
