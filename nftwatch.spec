@@ -7,7 +7,7 @@ License:        GPLv3
 URL:            https://github.com/flyingrhinonz/nftwatch
 Source0:        https://github.com/flyingrhinonz/nftwatch/archive/%{version}.tar.gz
 
-Requires:       python3
+Requires:       python3 python3-pyyaml
 
 %description
 View your nftables configuration.
