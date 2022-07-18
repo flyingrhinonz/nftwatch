@@ -37,7 +37,8 @@ About nftwatch
 --------------
 
 * Shows nftables policy in a more readable format.
-* Live counters table.
+* Live counters table (if you enabled counters in nft).
+* Scrollable output.
 * User-configurable refresh speed.
 * Pause display refresh.
 
@@ -46,8 +47,8 @@ Manual install instructions
 ---------------------------
 
 * Clone/download the project from the git repository.
-* Copy:  `/etc/nftwatch.yml`    .
-* Copy:  `/usr/local/bin/nftwatch`  and:  +x  it.
+* Required: Copy to:  `/usr/local/bin/nftwatch`  and: +x it.
+* Optional: Copy to:  `/etc/nftwatch.yml`
 * `nftwatch`  with no args to run it.
 * `nftwatch -m`  for this man page.
 
@@ -60,7 +61,7 @@ Others are hardcoded into the code - subject to improvement.
 Config file will be loaded from these paths - whichever
 is found first. If no config file is found - builtin
 defaults will be used.
-It's safe to run nftwatch without a config file.
+It is safe to run nftwatch without a config file.
 
 * ~/.config/nftwatch/nftwatch.yml
 * ~/.nftwatch.yml
@@ -102,17 +103,14 @@ Usage tips
 * If you see something interesting - pause the display
 and scroll the table if needed.
 * Add counters to your nftables rules if you want to see
-these values in nftwatch (by default rules don't have
+these values in nftwatch (by default nft rules don't have
 counters).
 * Slow down your display refresh rate to get more accurate
 results, as well as pickup rules that are rarely hit.
-At faster refresh rates your BPS/PPS rates will be
-higher than reality because the time it takes to read and
-calculate values is not accounted for (nftwatch uses
-simple division by refresh time per cycle).
+Refresh rates of 1 second and above yield accurate stats.
 * If short comments make it difficult to follow the line -
 toggle dot padding with:  `.`  to improve readability.
-Change will apply at next table redraw.
+This change will apply at next table redraw.
 And if this isn't enough:  `,`  will give you even more
 padding.
 
@@ -124,6 +122,9 @@ Increase the logging verbosity with:  `nftwatch -d`
 or permanently increase it in the code by changing this
 line:  `LogLevel = logging.DEBUG`    .
 Check  `journalctl -f`  for nftwatch logs.
+There is even more logging available in the code: many
+`LogWrite` lines are commented out due to too much
+logging - enable them as required.
 
 On rare occasions nftwatch exits and leaves the terminal
 messed up. Fix this by typing:  `reset`  in the terminal.
@@ -149,8 +150,9 @@ incorrect; the second cycle onwards will be fine until
 you change refresh speed again.
 - nftwatch is not a performance measurement tool - there
 are a few factors that prevent the BPS and PPS rates from
-being accurate, but as a rules troubleshooting assistant -
-it is close enough to be useful.
+being accurate, but it serves its main purpose of being a
+rules troubleshooting assistant as well as giving you
+fairly accurate stats.
 
 I initially wrote nftwatch because I wanted a realtime
 running output from nftables that was better than simply
@@ -241,8 +243,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.12'
-VersionDate     = '2022-05-07'
+__version__     = '1.0.13'
+VersionDate     = '2022-07-18'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -470,8 +472,8 @@ class GlobalConfig:
         # ^ Allows breakout of loops which have bigger sleep times
 
     HelpMenuItems = collections.OrderedDict((
-        #( 'ctrl-h',     'Help' ),
-        ( 'q',     'Quit' ),
+        ( 'q',              'Quit' ),
+        ( 'nftwatch -m',    'manpage' ),
     ))
 
     VerticalOffset = 0
@@ -494,6 +496,14 @@ class GlobalConfig:
 
     ForceScreenRedraw = False
         # ^ Force redraw the screen - useful when scrolling the display.
+
+    LoopOverhead = 0.01
+        # ^ Processing time taken for each read cycle. Used to increase
+        #       the accuracy of the stats by factoring in this delay.
+        #       Requires python 3.7+ for dynamic checking, else defaults
+        #       to 0.01 sec.
+        #   Even with this the accuracy wont be 100% so dont treat nftwatch
+        #       as a benchmarking tool.
 
 
 
@@ -688,8 +698,17 @@ def ReadNftOutput():
         # Read the nft rules outoput (along with counters and other fields) :
         if ( ( ( sys.version_info[0] == 3 ) and ( sys.version_info[1] >= 7 ) )
             or ( sys.version_info[0] > 3 ) ):
+            # ^ time.time_ns  was added in python 3.7  .
+            #   subprocess.run  improved in python 3.7  .
+
             NftOutput = subprocess.run(GlobalConfig.NftCommandLine,
                 capture_output=True, timeout=GlobalConfig.Timeout, check=True, text=True, shell=True)
+
+            LoopStartTime = ( time.time_ns() / 1000000000 )
+                # ^ Used to increase stat accuracy by accounting for processing time.
+            #LogWrite.debug('LoopStartTime == {}'.format(LoopStartTime))
+                # ^ Too much logging
+
         else:
             NftOutput = subprocess.run(GlobalConfig.NftCommandLine,
                 stdout=subprocess.PIPE, timeout=GlobalConfig.Timeout, check=True,
@@ -847,7 +866,8 @@ def ReadNftOutput():
                     if PrevLooper['Handle'] == HandleResult:
                         if ( PrevLooper['DetailsText'] == DetailsResult ) and ( PrevLooper['CommentText'] == CommentResult ):
                             if PacketsResult >=0:
-                                PPS = round((PacketsResult - PrevLooper['Packets']) / GlobalConfig.RefreshPeriod)
+                                PPS = round((PacketsResult - PrevLooper['Packets']) /
+                                    ( GlobalConfig.RefreshPeriod + GlobalConfig.LoopOverhead ) )
                                 PPSText = str(PPS)
                                 if len(PPSText) > MaxPPSTextLength:
                                     MaxPPSTextLength = len(PPSText)
@@ -860,7 +880,8 @@ def ReadNftOutput():
                                 HumanPPSText = ''
 
                             if BytesResult >=0:
-                                BPS = round((BytesResult - PrevLooper['Bytes']) / GlobalConfig.RefreshPeriod)
+                                BPS = round((BytesResult - PrevLooper['Bytes']) /
+                                    ( GlobalConfig.RefreshPeriod + GlobalConfig.LoopOverhead ) )
                                 BPSText = str(BPS)
                                 if len(BPSText) > MaxBPSTextLength:
                                     MaxBPSTextLength = len(BPSText)
@@ -942,6 +963,7 @@ def ReadNftOutput():
             'MaxDetailsTextLength': MaxDetailsTextLength                    # int
             })
         #LogWrite.debug('NftStats.LastMaxLengths == {}'.format(NftStats.LastMaxLengths))
+            # ^ Too much logging
 
         #LogLastSplitNftOutput()
             # ^ Too much logging
@@ -961,6 +983,7 @@ def ReadNftOutput():
                 # ^ Use this for display, allowing pause mode scroll while still updating the stats in the background.
                 #   If output paused - the frozen status (NftStats.FreezeSplitNftOutput) doesn't update - allowing
                 #       the user to scroll the display without updates.
+                # ^ Too much logging
 
         PopulateWindows()
         DisplayWindows()
@@ -968,6 +991,18 @@ def ReadNftOutput():
         #if GlobalConfig.RefreshScreen:
         # ^ I dont believe this check is required
         SmartSleep()
+
+        if ( ( ( sys.version_info[0] == 3 ) and ( sys.version_info[1] >= 7 ) )
+            or ( sys.version_info[0] > 3 ) ):
+            # ^ time.time_ns  was added in python 3.7
+
+            GlobalConfig.LoopOverhead = ( ( time.time_ns() / 1000000000 ) - LoopStartTime - GlobalConfig.RefreshPeriod )
+                # ^ Delay incurred by processing
+
+            #LogWrite.debug('Processing overhead - GlobalConfig.LoopOverhead == {}'.format(GlobalConfig.LoopOverhead))
+                # ^ Usually returns negative values when user quits nftwatch because sleep is skipped.
+                #       This doesnt matter because nftwatch is exiting.
+                # ^ Too much logging
 
         if GlobalConfig.ExitProgram:
             break
@@ -1147,15 +1182,16 @@ def SetupWindows(stdscr):
     # Build the various windows:
 
     # Build the help box:
-    Windows.HelpBox = curses.newwin(1, 10, GlobalConfig.ScreenHeight-1, 0)
+    Windows.HelpBox = curses.newwin(1, 30, GlobalConfig.ScreenHeight-1, 0)
         # ^ curses.newwin(nlines, ncols, begin_y, begin_x)
 
     for Looper in GlobalConfig.HelpMenuItems:
+        LogWrite.debug('Processing:  Looper == {}'.format(Looper))
         Windows.HelpBox.addstr('  '+Looper, curses.color_pair(1))
-        Windows.HelpBox.addstr('-'+GlobalConfig.HelpMenuItems[Looper], curses.color_pair(2))
+        Windows.HelpBox.addstr(' '+GlobalConfig.HelpMenuItems[Looper], curses.color_pair(2))
 
     # Build the status box:
-    Windows.StatusBox = curses.newwin(1, 45, GlobalConfig.ScreenHeight-1, 12)
+    Windows.StatusBox = curses.newwin(1, 65, GlobalConfig.ScreenHeight-1, 32)
         # ^ curses.newwin(nlines, ncols, begin_y, begin_x)
         #   If you overrun this window you get this error:
         #       _curses.error: addwstr() returned ERR
