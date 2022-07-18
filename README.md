@@ -33,7 +33,8 @@ About nftwatch
 --------------
 
 * Shows nftables policy in a more readable format.
-* Live counters table.
+* Live counters table (if you enabled counters in nft).
+* Scrollable output.
 * User-configurable refresh speed.
 * Pause display refresh.
 
@@ -42,8 +43,8 @@ Manual install instructions
 ---------------------------
 
 * Clone/download the project from the git repository.
-* Copy:  `/etc/nftwatch.yml`    .
-* Copy:  `/usr/local/bin/nftwatch`  and:  +x  it.
+* Required: Copy to:  `/usr/local/bin/nftwatch`  and: +x it.
+* Optional: Copy to:  `/etc/nftwatch.yml`
 * `nftwatch`  with no args to run it.
 * `nftwatch -m`  for this man page.
 
@@ -56,7 +57,7 @@ Others are hardcoded into the code - subject to improvement.
 Config file will be loaded from these paths - whichever
 is found first. If no config file is found - builtin
 defaults will be used.
-It's safe to run nftwatch without a config file.
+It is safe to run nftwatch without a config file.
 
 * ~/.config/nftwatch/nftwatch.yml
 * ~/.nftwatch.yml
@@ -98,17 +99,14 @@ Usage tips
 * If you see something interesting - pause the display
 and scroll the table if needed.
 * Add counters to your nftables rules if you want to see
-these values in nftwatch (by default rules don't have
+these values in nftwatch (by default nft rules don't have
 counters).
 * Slow down your display refresh rate to get more accurate
 results, as well as pickup rules that are rarely hit.
-At faster refresh rates your BPS/PPS rates will be
-higher than reality because the time it takes to read and
-calculate values is not accounted for (nftwatch uses
-simple division by refresh time per cycle).
+Refresh rates of 1 second and above yield accurate stats.
 * If short comments make it difficult to follow the line -
 toggle dot padding with:  `.`  to improve readability.
-Change will apply at next table redraw.
+This change will apply at next table redraw.
 And if this isn't enough:  `,`  will give you even more
 padding.
 
@@ -120,6 +118,9 @@ Increase the logging verbosity with:  `nftwatch -d`
 or permanently increase it in the code by changing this
 line:  `LogLevel = logging.DEBUG`    .
 Check  `journalctl -f`  for nftwatch logs.
+There is even more logging available in the code: many
+`LogWrite` lines are commented out due to too much
+logging - enable them as required.
 
 On rare occasions nftwatch exits and leaves the terminal
 messed up. Fix this by typing:  `reset`  in the terminal.
@@ -145,8 +146,9 @@ incorrect; the second cycle onwards will be fine until
 you change refresh speed again.
 - nftwatch is not a performance measurement tool - there
 are a few factors that prevent the BPS and PPS rates from
-being accurate, but as a rules troubleshooting assistant -
-it is close enough to be useful.
+being accurate, but it serves its main purpose of being a
+rules troubleshooting assistant as well as giving you
+fairly accurate stats.
 
 I initially wrote nftwatch because I wanted a realtime
 running output from nftables that was better than simply
