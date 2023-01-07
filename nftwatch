@@ -153,6 +153,11 @@ are a few factors that prevent the BPS and PPS rates from
 being accurate, but it serves its main purpose of being a
 rules troubleshooting assistant as well as giving you
 fairly accurate stats.
+- Empty lines in the output come from nftables, not
+nftwatch. nftables does not add an empty line before new
+tables, therefore subsequent tables are printed directly
+below the closing brace of the last block. For example -
+can be seen in the table fail2ban adds.
 
 I initially wrote nftwatch because I wanted a realtime
 running output from nftables that was better than simply
@@ -243,8 +248,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.13'
-VersionDate     = '2022-07-18'
+__version__     = '1.0.14'
+VersionDate     = '2023-01-07'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
