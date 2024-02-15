@@ -88,6 +88,8 @@ The following keyboard controls are available:
 - End or G:         Jump to table bottom
 - PgUp or b:        Page up in the table
 - PgDn or space:    Page down in the table
+- [                 Half page up in the table
+- ]                 Half page down in the table
 - Ctrl-q or q:      Quit
 
 
@@ -177,6 +179,7 @@ import getpass
 import itertools
 import logging
 import logging.handlers
+import math
 import operator
 import os
 import pathlib
@@ -248,8 +251,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.0.14'
-VersionDate     = '2023-01-07'
+__version__     = '1.1.1'
+VersionDate     = '2024-02-15'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -554,10 +557,10 @@ class GlobalConfig:
     Timeout = 2
         # ^ Wait n seconds for command output
 
-    ReLeadingWhitespace = re.compile('^\s+')
+    ReLeadingWhitespace = re.compile(r'^\s+')
         # ^ Look for leading whitespace
 
-    ReCounter = re.compile('counter packets \d+ bytes \d+')
+    ReCounter = re.compile(r'counter packets \d+ bytes \d+')
         # ^ Matches:  "counter packets x bytes y"  text
 
     ReComment = re.compile('comment "(.*?)"')
@@ -566,7 +569,7 @@ class GlobalConfig:
     ReHandle = re.compile(' # handle.*')
         # ^ Matches:  " handle x"  text
 
-    ReMultipleSpaces = re.compile('\s+')
+    ReMultipleSpaces = re.compile(r'\s+')
         # ^ Used to replace multiple whitespace with a single space
 
     ExitProgram = False
@@ -1352,7 +1355,15 @@ def MainCursesFunction(stdscr):
             #   Per the docs here:  https://docs.python.org/3/howto/curses.html  - getch
             #       refreshes the screen and then waits for input. But we have windows, not only
             #       the main stdscr screen, so refreshing stdscr will make the display disappear.
-        LogWrite.debug('UserKey == {}'.format(UserKey))
+
+        LogWrite.debug('UserKey == {} , '
+            'NftStats.LenLastRead == {} , '
+            'GlobalConfig.VerticalOffset == {} , '
+            'GlobalConfig.MaxScreenLines == {}'
+                .format(UserKey,
+                    NftStats.LenLastRead,
+                    GlobalConfig.VerticalOffset,
+                    GlobalConfig.MaxScreenLines))
 
         if UserKey in [17, 113]:
             # ^ ctrl-q or q key to Quit
@@ -1442,6 +1453,34 @@ def MainCursesFunction(stdscr):
                     GlobalConfig.VerticalOffset = 0
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
             GlobalConfig.ForceScreenRedraw = True
+
+        elif UserKey in [93]:
+            # ^ ] key for scrolling half a page down
+            #LogWrite.debug('Inside:  ]  key processor...')
+            if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + GlobalConfig.MaxScreenLines ):
+                #LogWrite.debug('Inside: first level if...')
+                # ^ Are there enough lines below to allow page down?
+                if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset + ( GlobalConfig.MaxScreenLines * 2 ) ):
+                    #LogWrite.debug('Inside: second level if...')
+                    GlobalConfig.VerticalOffset += math.trunc(( GlobalConfig.MaxScreenLines - 1 ) / 2 )
+                else:
+                    GlobalConfig.VerticalOffset = ( NftStats.LenLastRead - GlobalConfig.MaxScreenLines + 1 )
+                    #LogWrite.debug('Inside: second level else...')
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
+
+        elif UserKey in [91]:
+            # ^ [ key for scrolling half a page up
+            if GlobalConfig.VerticalOffset > 0:
+                # ^ Are there enough lines above to allow half a page up?
+                if GlobalConfig.VerticalOffset >= ( math.trunc(GlobalConfig.MaxScreenLines / 2) ):
+                #if NftStats.LenLastRead >= ( GlobalConfig.VerticalOffset - GlobalConfig.MaxScreenLines ):
+                    GlobalConfig.VerticalOffset -= ( math.trunc(GlobalConfig.MaxScreenLines / 2) - 1 )
+                else:
+                    GlobalConfig.VerticalOffset = 0
+                #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
+
 
         # Check if the window was resized since it was started:
         NewScreenHeight, NewScreenWidth = stdscr.getmaxyx()

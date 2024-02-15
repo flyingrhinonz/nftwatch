@@ -84,6 +84,8 @@ The following keyboard controls are available:
 - End or G:         Jump to table bottom
 - PgUp or b:        Page up in the table
 - PgDn or space:    Page down in the table
+- [                 Half page up in the table
+- ]                 Half page down in the table
 - Ctrl-q or q:      Quit
 
 
