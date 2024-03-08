@@ -3,7 +3,11 @@
 # nftwatch internal configs:
 
 nftwatch_config_NftCommandLine: '/usr/sbin/nft -nn --handle list ruleset'
+#nftwatch_config_NftCommandLine: '/usr/sbin/nft -nn --handle --terse list ruleset'
 # ^ The command line used to read the nftables output.
+#   The line with:  `--terse`  omits contents of sets.
+#   There are other options available - look at:  `nft --help`  to list the
+#     available options in the section:  `Options (ruleset list formatting)`
 
 
 nftwatch_config_RefreshPeriod: 2

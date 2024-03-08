@@ -4,7 +4,7 @@ nftwatch
 
 ![](nftwatch.png)
 
-Copyright (C) 2021-2022 Kenneth Aaron.
+Copyright (C) 2021-2024 Kenneth Aaron.
 
 flyingrhino AT orcon DOT net DOT nz
 
@@ -100,17 +100,28 @@ Usage tips
 
 * If you see something interesting - pause the display
 and scroll the table if needed.
+
 * Add counters to your nftables rules if you want to see
 these values in nftwatch (by default nft rules don't have
 counters).
+
 * Slow down your display refresh rate to get more accurate
 results, as well as pickup rules that are rarely hit.
 Refresh rates of 1 second and above yield accurate stats.
+
 * If short comments make it difficult to follow the line -
 toggle dot padding with:  `.`  to improve readability.
 This change will apply at next table redraw.
 And if this isn't enough:  `,`  will give you even more
 padding.
+
+* To control the output of nftables - for example to omit
+the contents of sets - use the config file:
+`nftwatch.yml`  and edit the value of:
+`nftwatch_config_NftCommandLine` .
+`nft --help`  -->  `Options (ruleset list formatting)`
+gives the various controls over nftables output - some
+work with nftwatch (such as:  `--terse`)  and some dont.
 
 
 Troubleshooting
