@@ -4,7 +4,7 @@ nftwatch
 
 ![](nftwatch.png)
 
-Copyright (C) 2021-2024 Kenneth Aaron.
+Copyright (C) 2021+ Kenneth Aaron.
 
 flyingrhino AT orcon DOT net DOT nz
 
