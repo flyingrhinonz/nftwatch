@@ -263,8 +263,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.1.2'
-VersionDate     = '2024-03-08'
+__version__     = '1.1.3'
+VersionDate     = '2024-12-21'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
@@ -476,8 +476,15 @@ class GlobalConfig:
     # ncurses vars:
     # =============
 
+    MinScreenWidth = 80
+        # ^ Minimal enforced terminal width due to status line length
+
+    MinScreenHeight = 15
+        # ^ Minimal enforced window height.
+        #       A sensible number, could be lower if you really want
+
     ScreenHeight = ScreenWidth = 0
-        # ^ The terminal window dimensions
+        # ^ The actual terminal window dimensions populated based upon your window size
 
     MaxScreenLines = 0
         # ^ Max number of nft rules to display
@@ -1191,10 +1198,10 @@ def SetupCurses(stdscr):
     LogWrite.debug('GlobalConfig.MaxScreenLines == {} , GlobalConfig.DetailsWidth == {}'
         .format(GlobalConfig.MaxScreenLines, GlobalConfig.DetailsWidth))
 
-    if GlobalConfig.ScreenWidth < 60 or GlobalConfig.ScreenHeight < 15:
+    if GlobalConfig.ScreenWidth < GlobalConfig.MinScreenWidth or GlobalConfig.ScreenHeight < GlobalConfig.MinScreenHeight:
         RestoreTerminal(stdscr)
-        LogWrite.warning( { 'tee': '\nnftwatch window must be at least 60x15. GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}\n'
-                .format(GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth) } )
+        LogWrite.warning( { 'tee': '\nnftwatch window must be at least {}x{}. Your actual terminal dimensions:   GlobalConfig.ScreenHeight == {} , GlobalConfig.ScreenWidth == {}\n'
+                .format(GlobalConfig.MinScreenWidth, GlobalConfig.MinScreenHeight, GlobalConfig.ScreenHeight, GlobalConfig.ScreenWidth) } )
         return False
 
     LogWrite.debug('Function SetupCurses should have completed successfully')
@@ -1217,10 +1224,13 @@ def SetupWindows(stdscr):
         Windows.HelpBox.addstr(' '+GlobalConfig.HelpMenuItems[Looper], curses.color_pair(2))
 
     # Build the status box:
-    Windows.StatusBox = curses.newwin(1, 80, GlobalConfig.ScreenHeight-1, 32)
+    Windows.StatusBox = curses.newwin(1, GlobalConfig.MinScreenWidth, GlobalConfig.ScreenHeight-1, 32)
         # ^ curses.newwin(nlines, ncols, begin_y, begin_x)
         #   If you overrun this window you get this error:
         #       _curses.error: addwstr() returned ERR
+        #   Why does begin_x have a value of 32 - because this is where the 'changeable' status
+        #       values begin:  'Update=False  Sle...' . The text prior to this is fixed and is
+        #       not part of the StatusBox window.
     Windows.StatusBox.addstr('Update='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
         # ^ This is the refresh (pause in reverse) status
     Windows.StatusBox.addstr('  Sleep='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
