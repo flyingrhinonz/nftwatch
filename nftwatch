@@ -1290,6 +1290,10 @@ def PopulateWindows():
     Windows.StatusBox.erase()
     CounterString = ''
 
+    if ( GlobalConfig.VerticalOffset > ( NftStats.LenFreezeRead - GlobalConfig.MaxScreenLines) ):
+        # ^ If we're scrolled beyond the results, jump back up to the last full page
+        GlobalConfig.VerticalOffset = NftStats.LenFreezeRead - GlobalConfig.MaxScreenLines
+
     LinesToDisplay = min( ( GlobalConfig.VerticalOffset + GlobalConfig.ScreenHeight - 3 ), NftStats.LenFreezeRead )
         # ^ Issue #3 - nftwatch crashes if table shorter than page height
 
