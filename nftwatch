@@ -82,6 +82,7 @@ The following keyboard controls are available:
 - p:                Pause the display refresh
 - .:                Toggles comment dot padding
 - ,:                Toggles even more dot padding
+- 0:                Toggles hiding rules with 0 packets counted
 - Up arrow or N:    Scroll the table up
 - Down arrow or n:  Scroll the table down
 - Home or g:        Jump to table top
@@ -524,6 +525,9 @@ class GlobalConfig:
         #   Even with this the accuracy wont be 100% so dont treat nftwatch
         #       as a benchmarking tool.
 
+    FilterZeroes = False
+        # ^ Filter out rules with zero counters
+
 
 
     # Config file vars:
@@ -795,6 +799,9 @@ def ReadNftOutput():
                 BytesTextResult = str(BytesResult)
                 if len(BytesTextResult) > MaxBytesTextLength:
                     MaxBytesTextLength = len(BytesTextResult)
+
+                if GlobalConfig.FilterZeroes and PacketsResult == 0:
+                    continue
 
             else:
                 CounterResult = False
@@ -1210,7 +1217,7 @@ def SetupWindows(stdscr):
         Windows.HelpBox.addstr(' '+GlobalConfig.HelpMenuItems[Looper], curses.color_pair(2))
 
     # Build the status box:
-    Windows.StatusBox = curses.newwin(1, 65, GlobalConfig.ScreenHeight-1, 32)
+    Windows.StatusBox = curses.newwin(1, 80, GlobalConfig.ScreenHeight-1, 32)
         # ^ curses.newwin(nlines, ncols, begin_y, begin_x)
         #   If you overrun this window you get this error:
         #       _curses.error: addwstr() returned ERR
@@ -1218,6 +1225,8 @@ def SetupWindows(stdscr):
         # ^ This is the refresh (pause in reverse) status
     Windows.StatusBox.addstr('  Sleep='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
         # ^ This is the sleep time between refreshes
+    Windows.StatusBox.addstr('  Hide 0s='+str(GlobalConfig.FilterZeroes), curses.color_pair(9))
+        # ^ This is whether the zero filter is on
 
     Windows.HelpBox.keypad(True)
         # ^ Get special keys support for this window.
@@ -1326,6 +1335,7 @@ def PopulateWindows():
 
     Windows.StatusBox.addstr('Update='+str(GlobalConfig.RefreshScreen), curses.color_pair(9))
     Windows.StatusBox.addstr('  Sleep='+str(GlobalConfig.RefreshPeriod), curses.color_pair(9))
+    Windows.StatusBox.addstr('  Hide 0s='+str(GlobalConfig.FilterZeroes), curses.color_pair(9))
 
 
 def DisplayWindows():
@@ -1490,6 +1500,11 @@ def MainCursesFunction(stdscr):
                 else:
                     GlobalConfig.VerticalOffset = 0
                 #LogWrite.debug('GlobalConfig.VerticalOffset == {}'.format(GlobalConfig.VerticalOffset))
+            GlobalConfig.ForceScreenRedraw = True
+
+        elif UserKey in [48]:
+            # ^ 0 key for toggling zero filter
+            GlobalConfig.FilterZeroes = not GlobalConfig.FilterZeroes
             GlobalConfig.ForceScreenRedraw = True
 
 

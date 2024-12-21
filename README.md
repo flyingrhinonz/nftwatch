@@ -78,6 +78,7 @@ The following keyboard controls are available:
 - p:                Pause the display refresh
 - .:                Toggles comment dot padding
 - ,:                Toggles even more dot padding
+- 0:                Toggles hiding rules with 0 packets counted
 - Up arrow or N:    Scroll the table up
 - Down arrow or n:  Scroll the table down
 - Home or g:        Jump to table top
