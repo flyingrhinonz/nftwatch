@@ -263,8 +263,8 @@ SecureLogging = False
 
 
 # Program identification strings:
-__version__     = '1.1.3'
-VersionDate     = '2024-12-21'
+__version__     = '1.1.4'
+VersionDate     = '2024-12-27'
 ProgramName     = 'nftables counters watcher'
 AuthorName      = 'Kenneth Aaron'
 AuthorEmail     = 'flyingrhino AT orcon DOT net DOT nz'
